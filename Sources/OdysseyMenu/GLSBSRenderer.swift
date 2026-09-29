@@ -23,6 +23,7 @@ final class GLSBSRenderer: NSOpenGLView {
   private var pose: StereoTrackingPose?
   private var timer: Timer?
   private(set) var renderedFrames = 0
+  private var gpuUploads = 0, cpuUploads = 0
   var layout: SBSLayout = .fullWidth { didSet { uploadedVersion = 0 } }
   var presented: ((Bool) -> Void)?
   var failure: ((Error) -> Void)?
@@ -56,13 +57,16 @@ final class GLSBSRenderer: NSOpenGLView {
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
   func begin() {
-    timer = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] _ in
-      self?.needsDisplay = true
+    let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated { self?.needsDisplay = true }
     }
+    self.timer = timer
+    RunLoop.main.add(timer, forMode: .common)
   }
   func end() {
     timer?.invalidate()
     timer = nil
+    print("Weaver uploads: \(gpuUploads) GPU surfaces, \(cpuUploads) CPU copies")
     openGLContext?.makeCurrentContext()
     if let renderer {
       odyssey_gl_destroy(renderer)
@@ -104,15 +108,24 @@ final class GLSBSRenderer: NSOpenGLView {
       return
     }
     if version != uploadedVersion {
-      CVPixelBufferLockBaseAddress(buffer, .readOnly)
       let width = CVPixelBufferGetWidth(buffer)
       let height = CVPixelBufferGetHeight(buffer)
       let top = layout == .fullWidth ? height / 4 : 0
       let crop = layout == .fullWidth ? height / 2 : height
-      let status = odyssey_gl_source(
-        renderer, CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self),
-        Int32(width), Int32(height), CVPixelBufferGetBytesPerRow(buffer), Int32(top), Int32(crop))
-      CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+      var status: Int32 = 1
+      if let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() {
+        status = odyssey_gl_source_surface(renderer, surface, Int32(top), Int32(crop))
+      }
+      if status == 0 {
+        gpuUploads += 1
+      } else {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        status = odyssey_gl_source(
+          renderer, CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self),
+          Int32(width), Int32(height), CVPixelBufferGetBytesPerRow(buffer), Int32(top), Int32(crop))
+        CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+        cpuUploads += 1
+      }
       guard status == 0 else {
         failure?(WeaverRenderFailure.unavailable)
         return

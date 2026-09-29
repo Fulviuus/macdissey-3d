@@ -43,9 +43,5 @@ install_name_tool -delete_rpath "$PWD/.tools/litert-native/lib" "$bundle/Content
 install_name_tool -delete_rpath "$PWD/.tools/onnx-native/lib" "$bundle/Contents/MacOS/OdysseyMenu"
 # Remove debug symbols before applying the final bundle signature.
 strip -S "$bundle/Contents/MacOS/OdysseyMenu"
-codesign --force --sign - "$bundle/Contents/Frameworks/libLiteRt.dylib"
-codesign --force --sign - "$bundle/Contents/Frameworks/libonnxruntime.1.dylib"
-codesign --force --sign - "$bundle/Contents/MacOS/7zz"
-codesign --force --sign - "$bundle"
-codesign --verify --strict "$bundle"
+python3 scripts/sign-app.py "$bundle"
 printf '%s\n' "$bundle"

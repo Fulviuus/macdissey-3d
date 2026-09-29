@@ -47,7 +47,7 @@ let package = Package(
     .target(name: "OdysseyCamera", dependencies: ["OdysseyCore"]),
     .target(
       name: "OdysseyGL", cxxSettings: [.unsafeFlags([portablePaths])],
-      linkerSettings: [.linkedFramework("OpenGL")]),
+      linkerSettings: [.linkedFramework("OpenGL"), .linkedFramework("IOSurface")]),
     .target(name: "OdysseyRendering", dependencies: ["OdysseyCore"]),
     .target(name: "OdysseyMonitor"),
     .executableTarget(
@@ -58,6 +58,11 @@ let package = Package(
     .executableTarget(
       name: "DisplayColorChecks", dependencies: ["OdysseyRendering"],
       path: "Tests/DisplayColorChecks"),
+    .executableTarget(
+      name: "DesktopCompositorChecks", dependencies: ["OdysseyRendering"],
+      path: "Tests/DesktopCompositorChecks"),
+    .executableTarget(
+      name: "GLSurfaceChecks", dependencies: ["OdysseyGL"], path: "Tests/GLSurfaceChecks"),
     // Command Line Tools installations do not ship XCTest. These checks
     // run on the same minimal toolchain used to build the application.
     .executableTarget(name: "CoreChecks", dependencies: ["OdysseyCore"], path: "Tests/CoreChecks"),

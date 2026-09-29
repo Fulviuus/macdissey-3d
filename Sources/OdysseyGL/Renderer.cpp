@@ -1,5 +1,7 @@
 #define GL_SILENCE_DEPRECATION
 #include "OdysseyGL.h"
+#include <OpenGL/CGLIOSurface.h>
+#include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <cstdio>
 #include <cstring>
@@ -9,8 +11,12 @@
 struct OdysseyGL {
   GLuint program = 0, vao = 0, buffers[2] = {0}, textures[4] = {0};
   int width = 0, height = 0;
+  GLuint surfaceTexture = 0, copyFrames[2] = {0};
   std::vector<uint8_t> upload;
   ~OdysseyGL() {
+    glDeleteFramebuffers(2, copyFrames);
+    if (surfaceTexture)
+      glDeleteTextures(1, &surfaceTexture);
     glDeleteTextures(4, textures);
     glDeleteBuffers(2, buffers);
     if (vao)
@@ -145,6 +151,66 @@ int odyssey_gl_source(OdysseyGL *r, const uint8_t *pixels, int width, int height
     return 2;
   }
 }
+int odyssey_gl_source_surface(OdysseyGL *r, IOSurfaceRef surface, int top, int crop) {
+  if (!r || !surface || IOSurfaceGetPlaneCount(surface) != 0 ||
+      IOSurfaceGetPixelFormat(surface) != 0x42475241 || IOSurfaceGetBytesPerElement(surface) != 4)
+    return 1;
+  const int width = (int)IOSurfaceGetWidth(surface), height = (int)IOSurfaceGetHeight(surface);
+  if (width < 2 || width > 8192 || width % 2 || height < 1 || height > 8192 || top < 0 ||
+      crop < 1 || top > height - crop)
+    return 1;
+  if (!r->surfaceTexture) {
+    glGenTextures(1, &r->surfaceTexture);
+    glGenFramebuffers(2, r->copyFrames);
+  }
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_RECTANGLE, r->surfaceTexture);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  const auto result =
+      CGLTexImageIOSurface2D(CGLGetCurrentContext(), GL_TEXTURE_RECTANGLE, GL_RGBA8, width, height,
+                             GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, surface, 0);
+  if (result != kCGLNoError) {
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    return 2;
+  }
+  glBindTexture(GL_TEXTURE_2D, r->textures[0]);
+  if (width != r->width || crop != r->height) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, crop, 0, GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
+    r->width = width;
+    r->height = crop;
+  }
+  GLint readFrame = 0, drawFrame = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFrame);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFrame);
+  const auto scissor = glIsEnabled(GL_SCISSOR_TEST);
+  const auto srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_FRAMEBUFFER_SRGB);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, r->copyFrames[0]);
+  glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE,
+                         r->surfaceTexture, 0);
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, r->copyFrames[1]);
+  glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, r->textures[0],
+                         0);
+  glDrawBuffer(GL_COLOR_ATTACHMENT0);
+  const bool complete = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE &&
+                        glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+  if (complete)
+    glBlitFramebuffer(0, top + crop, width, top, 0, 0, width, crop, GL_COLOR_BUFFER_BIT,
+                      GL_NEAREST);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, readFrame);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFrame);
+  if (scissor)
+    glEnable(GL_SCISSOR_TEST);
+  if (srgb)
+    glEnable(GL_FRAMEBUFFER_SRGB);
+  const auto error = glGetError();
+  return complete && error == GL_NO_ERROR ? 0 : 2;
+}
+
 int odyssey_gl_draw(OdysseyGL *r, const float *vertices, int woven) {
   if (!r || !vertices || !r->width)
     return 1;

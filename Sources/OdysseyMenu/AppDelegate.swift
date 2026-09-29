@@ -1,9 +1,11 @@
 import AppKit
 import Carbon
+import OSLog
 import OdysseyCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+  private let logger = Logger(subsystem: "local.odyssey3d.research", category: "session")
   private var statusItem: NSStatusItem!
   private let threeD = ThreeDSession()
   private var threeDStatus = "3D is off"
@@ -17,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var startTask: Task<Void, Never>?
   private var terminationPending = false
   private var afterStop: (() -> Void)?
+  private let alerts = AlertPresenter()
   private var factoryProfile: FactoryProfile?
   private var factoryLoading = false
   private var factoryStatus = "Connect the Odyssey video and USB cables."
@@ -52,7 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     rebuildMenu()
     loadFactoryProfile()
     do { try changeShortcut(to: shortcut) } catch { show(error.localizedDescription) }
-    threeD.failure = { [weak self] error in self?.stop3D(message: error.localizedDescription) }
+    threeD.failure = { [weak self] error in
+      self?.stop3D(message: error.localizedDescription, reason: "pipeline error")
+    }
     threeD.status = { [weak self] status in
       self?.threeDStatus = status
       self?.refreshStatus()
@@ -72,6 +77,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   func menuWillOpen(_ menu: NSMenu) {
+    if running || changing {
+      // Our own windows are excluded from capture, so this menu would be
+      // invisible underneath the 3D overlay. Exit tracking before awaiting
+      // shutdown, then reopen it after the real desktop is visible.
+      afterStop = { [weak self] in self?.statusItem.button?.performClick(nil) }
+      DispatchQueue.main.async { [weak self, weak menu] in
+        menu?.cancelTracking()
+        self?.stop3D()
+      }
+      return
+    }
     loadFactoryProfile()
     rebuildMenu()
   }
@@ -121,11 +137,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     toggle.isEnabled = !changing
     toggle.toolTip = running ? threeDStatus : factoryStatus
     menu.addItem(toggle)
+    let desktop = item("Try Desktop 3D (Experimental Gimmick)", #selector(toggleDesktop))
+    desktop.isEnabled = !running && !changing
+    desktop.toolTip =
+      "An experimental gimmick that puts the background behind the front window. Escape exits."
+    menu.addItem(desktop)
     menu.addItem(.separator())
     for layout in [SBSLayout.halfWidth, .fullWidth] {
       let option = item(layout.title, #selector(selectLayout(_:)))
       option.tag = layout.rawValue
       option.state = threeD.layout == layout ? .on : .off
+      option.isEnabled = !(running && threeD.mode == .desktop)
       option.toolTip =
         layout == .halfWidth
         ? "Stretch each complete eye view to fill the screen."
@@ -168,6 +190,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc private func toggle3D() {
+    activate3D(mode: .video)
+  }
+
+  @objc private func toggleDesktop() {
+    activate3D(mode: .desktop)
+  }
+
+  private func activate3D(mode: PresentationMode) {
     guard !stopping, !settings.isRecording else { return }
     if running || changing {
       stop3D()
@@ -187,11 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     settings.close()
+    threeD.mode = mode
     changing = true
     threeDStatus = "Starting 3D…"
     rebuildMenu()
     startTask = Task { [weak self] in
       guard let self else { return }
+      var failureMessage: String?
       do {
         try await threeD.start(on: screen, profile: profile)
         running = true
@@ -199,16 +231,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         running = false
         escapeKey = nil
         threeDStatus = "3D is off"
-        if !(error is CancellationError) { show(error.localizedDescription) }
+        if !(error is CancellationError) { failureMessage = error.localizedDescription }
       }
       if !stopping { changing = false }
       startTask = nil
       rebuildMenu()
+      if let failureMessage, !stopping, !terminationPending { show(failureMessage) }
     }
   }
 
-  private func stop3D(message: String? = nil) {
+  private func stop3D(message: String? = nil, reason: String = "user request") {
     guard (running || changing) && !stopping else { return }
+    logger.notice("Stopping 3D: \(reason, privacy: .public)")
     stopping = true
     let pendingStart = startTask
     pendingStart?.cancel()
@@ -236,10 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   @objc private func displayChanged(_ notification: Notification) {
     // A native-mode switch during startup generates this notification.
-    if changing && notification.name == NSApplication.didChangeScreenParametersNotification {
-      return
+    if notification.name == NSApplication.didChangeScreenParametersNotification {
+      if changing || threeD.outputDisplayIsUnchanged { return }
     }
-    stop3D()
+    stop3D(reason: notification.name.rawValue)
   }
 
   private func presentAfterStopping(_ action: @escaping () -> Void) {
@@ -263,15 +297,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let alert = NSAlert()
       alert.messageText = "macdissey 3d"
       alert.informativeText =
-        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nVersion \(version)"
+        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nDesktop 3D is an experimental gimmick for trying a simple depth effect on your windows.\n\nVersion \(version)"
       alert.icon = NSApp.applicationIconImage
       alert.addButton(withTitle: "OK")
-      NSApp.activate(ignoringOtherApps: true)
-      alert.runModal()
+      alerts.present(alert)
     }
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    alerts.dismiss()
     guard running || changing else { return .terminateNow }
     terminationPending = true
     afterStop = nil
@@ -286,7 +320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     alert.messageText = "macdissey 3d"
     alert.informativeText = message
     alert.addButton(withTitle: "OK")
-    NSApp.activate(ignoringOtherApps: true)
-    alert.runModal()
+    alerts.present(alert)
   }
 }

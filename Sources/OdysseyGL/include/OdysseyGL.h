@@ -1,5 +1,6 @@
 #ifndef ODYSSEY_GL_H
 #define ODYSSEY_GL_H
+#include <IOSurface/IOSurfaceRef.h>
 #include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
@@ -15,6 +16,10 @@ void odyssey_gl_destroy(OdysseyGL *renderer);
 // inside the fullscreen letterbox. No geometry or calibration is altered.
 int odyssey_gl_source(OdysseyGL *renderer, const uint8_t *pixels, int width, int height,
                       size_t stride, int crop_top, int crop_height);
+// Import IOSurface storage and flip/crop on the GPU. The caller must retain the
+// pixel buffer until its GL work completes. Nonzero permits a CPU-path fallback.
+int odyssey_gl_source_surface(OdysseyGL *renderer, IOSurfaceRef surface, int crop_top,
+                              int crop_height);
 // Vertices are original 3x16 floats: XYZW,phase4,ray4,screen2,weave2.
 // Draw into the caller's framebuffer at exactly3840x2160. woven=false shows
 // the original shader's left view; it does not invent a tracking position.

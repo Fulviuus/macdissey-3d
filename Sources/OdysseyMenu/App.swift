@@ -6,10 +6,28 @@ enum MacdisseyMain {
     if OutputWatchdog.runIfRequested() { return }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    if CommandLine.arguments.contains("--integration-smoke-test") {
+    if CommandLine.arguments.contains("--screen-capture-check") {
+      Task { @MainActor in
+        do {
+          try await ScreenCaptureAccess.check()
+          print("PASS: ScreenCaptureKit access authorized")
+          fflush(stdout)
+          NSApp.terminate(nil)
+        } catch {
+          fputs("ScreenCaptureKit access failed: \(error)\n", stderr)
+          exit(1)
+        }
+      }
+      app.run()
+      return
+    }
+    if CommandLine.arguments.contains("--integration-smoke-test")
+      || CommandLine.arguments.contains("--desktop-smoke-test")
+    {
       Task { @MainActor in
         let session = ThreeDSession()
         session.allowsLensActivation = false
+        if CommandLine.arguments.contains("--desktop-smoke-test") { session.mode = .desktop }
         var failure: Error?
         session.failure = { failure = $0 }
         do {
@@ -20,13 +38,22 @@ enum MacdisseyMain {
           }
           let profile = try await Task.detached { try FactoryProfile.retrieve(port: port) }.value
           try await session.start(on: screen, profile: profile)
-          try await Task.sleep(nanoseconds: 2_000_000_000)
+          let duration =
+            CommandLine.arguments.contains("--extended-check")
+            ? 60 : (session.mode == .desktop ? 5 : 2)
+          for _ in 0..<duration {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            if let failure { throw failure }
+            guard session.outputDisplayIsUnchanged else {
+              throw AppError.unavailable("Output display changed during integration check")
+            }
+          }
           let frames = session.renderedFrames
           await session.stop()
           if let failure { throw failure }
           guard frames > 0 else { throw AppError.unavailable("No frames rendered") }
           print(
-            "PASS: native 4K capture, original GLSL, camera pipeline, \(frames) presented frames, shutdown and mode restoration. Lenses kept off."
+            "PASS: \(session.mode == .desktop ? "desktop depth" : "SBS video"), native 4K capture, original GLSL, camera pipeline, \(frames) presented frames, shutdown and mode restoration. Lenses kept off."
           )
           fflush(stdout)
           NSApp.terminate(nil)

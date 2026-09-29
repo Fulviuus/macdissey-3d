@@ -37,27 +37,36 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
   func stream(_ stream: SCStream, didStopWithError error: Error) { failure?(error) }
 }
 
+enum PresentationMode { case video, desktop }
+
 @MainActor final class ThreeDSession {
   private var stream: SCStream?, sink: ThreeDCaptureSink?, window: NSWindow?,
     renderer: GLSBSRenderer?
   private var camera: StereoCamera?, lens: LensOutput?
   private var savedMode: CGDisplayMode?, displayID: CGDirectDisplayID = 0
   private var watchdog: OutputWatchdogClient?
+  private var desktopCapture: DesktopCapture?
   private let captureQueue = DispatchQueue(label: "Odyssey.3D-capture", qos: .userInteractive)
   var failure: ((Error) -> Void)?
   var status: ((String) -> Void)?
   var allowsLensActivation = true
+  var mode: PresentationMode = .video
   var renderedFrames: Int { renderer?.renderedFrames ?? 0 }
-  var layout = SBSLayout.fullWidth { didSet { renderer?.layout = layout } }
+  var layout = SBSLayout.fullWidth { didSet { if mode == .video { renderer?.layout = layout } } }
   private var weaving = false
+  private var outputDisplayState: OutputDisplayState?
+  private var outputColorSpace: CGColorSpace?
+
+  var outputDisplayIsUnchanged: Bool {
+    guard let outputDisplayState, OutputDisplayState.current(displayID) == outputDisplayState,
+      let outputColorSpace
+    else { return false }
+    return CFEqual(outputColorSpace, CGDisplayCopyColorSpace(displayID))
+  }
 
   func start(on screen: NSScreen, profile: FactoryProfile) async throws {
-    guard CGPreflightScreenCaptureAccess() else {
-      CGRequestScreenCaptureAccess()
-      throw AppError.unavailable(
-        "Allow macdissey 3d in System Settings → Privacy & Security → Screen & System Audio Recording, then reopen the app."
-      )
-    }
+    try await ScreenCaptureAccess.check()
+    try Task.checkCancellation()
     if !StereoCamera.authorized {
       guard await StereoCamera.requestAuthorization() else { throw StereoCameraError.permission }
     }
@@ -106,7 +115,7 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
         let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
       else { throw WeaverRenderFailure.unavailable }
       self.renderer = renderer
-      renderer.layout = layout
+      renderer.layout = mode == .desktop ? .halfWidth : layout
       renderer.failure = { [weak self] error in self?.failure?(error) }
       renderer.presented = { [weak self, weak lens] valid in
         guard let self else { return }
@@ -119,6 +128,8 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
       // a WindowServer window. Publish the overlay before building the
       // exclusion filter, then capture only after exclusion is verified.
       let outputColorSpace = CGDisplayCopyColorSpace(id)
+      self.outputColorSpace = outputColorSpace
+      outputDisplayState = OutputDisplayState.current(id)
       let window = NSWindow(
         contentRect: activeScreen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
       window.isReleasedWhenClosed = false
@@ -145,28 +156,39 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
       else {
         throw AppError.unavailable("Cannot capture the Odyssey while excluding the 3D overlay.")
       }
-      let sink = ThreeDCaptureSink()
-      sink.renderer = renderer
-      sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
-      sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
-      self.sink = sink
-      let config = SCStreamConfiguration()
-      config.width = 3840
-      config.height = 2160
-      config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-      config.queueDepth = 3
-      // The default capture colour space is the display's own profile.
-      // Avoid sRGB conversion, which also discards wide-gamut colours.
-      config.pixelFormat = kCVPixelFormatType_32BGRA
-      config.showsCursor = false
-      config.capturesAudio = false
-      let stream = SCStream(
-        filter: SCContentFilter(
-          display: display, excludingApplications: [application], exceptingWindows: []),
-        configuration: config, delegate: sink)
-      try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
-      self.stream = stream
-      try await stream.startCapture()
+      if mode == .desktop {
+        let desktop = DesktopCapture(
+          displayID: id, renderer: renderer,
+          colorSpace: outputColorSpace
+        ) { [weak self] error in
+          self?.failure?(error)
+        }
+        desktopCapture = desktop
+        try await desktop.start()
+      } else {
+        let sink = ThreeDCaptureSink()
+        sink.renderer = renderer
+        sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
+        sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
+        self.sink = sink
+        let config = SCStreamConfiguration()
+        config.width = 3840
+        config.height = 2160
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        config.queueDepth = 3
+        // The default capture colour space is the display's own profile.
+        // Avoid sRGB conversion, which also discards wide-gamut colours.
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.showsCursor = false
+        config.capturesAudio = false
+        let stream = SCStream(
+          filter: SCContentFilter(
+            display: display, excludingApplications: [application], exceptingWindows: []),
+          configuration: config, delegate: sink)
+        try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
+        self.stream = stream
+        try await stream.startCapture()
+      }
       let camera = StereoCamera(tracker: tracker)
       self.camera = camera
       camera.frame = { [weak renderer] value in renderer?.track(value.pose) }
@@ -187,6 +209,8 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
     renderer?.presented = nil
     await lens?.stop()
     lens = nil
+    await desktopCapture?.stop()
+    desktopCapture = nil
     weaving = false
     renderer?.end()
     window?.orderOut(nil)
@@ -202,6 +226,8 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
       _ = CGDisplaySetDisplayMode(displayID, savedMode, nil)
     }
     savedMode = nil
+    outputDisplayState = nil
+    outputColorSpace = nil
     displayID = 0
     watchdog?.stop()
     watchdog = nil

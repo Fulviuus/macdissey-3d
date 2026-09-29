@@ -39,12 +39,20 @@ Then grant **Camera** and **Screen Recording** (called **Screen & System Audio
 Recording** on newer macOS versions) permissions when prompted. Quit and reopen
 the app after changing permissions if requested.
 
+### Updating
+
+Quit the app before replacing it, and keep one installed copy in **Applications**.
+Public releases are ad-hoc signed, so an update may require granting Camera or
+Screen Recording permission again. If the toggle is enabled but capture is still
+denied, remove the old Screen Recording entry with **−**, add the installed app
+with **+**, enable it, then quit and reopen it.
+
 ## Watching a video
 
 1. Open an SBS video in a player and make it fullscreen on the Odyssey.
 2. Choose **Activate 3D** in the menu bar, or press **Control–Option–Command–3**.
-3. Look toward the monitor's camera. Press **Escape** or choose **Deactivate 3D**
-   to return to the desktop.
+3. Look toward the monitor's camera. Press **Escape**, press the activation
+   shortcut again, or open the macdissey menu to stop 3D.
 
 Use **Stretch to fill** for videos whose two eye views are horizontally squeezed.
 Use **Remove black bars** for full-width SBS video displayed with top and bottom
@@ -55,6 +63,25 @@ The monochrome menu bar icon adapts to the system appearance.
 
 Protected video may not be available to ScreenCaptureKit. The app does not bypass
 capture restrictions imposed by a player or streaming service.
+
+## Desktop 3D — experimental gimmick
+
+**Desktop 3D is a gimmick for having fun with desktop depth.** It remains
+experimental: expect rough edges and higher resource use than ordinary desktop
+work. SBS video playback remains the app's main purpose.
+
+Choose **Try Desktop 3D (Experimental Gimmick)** to keep the front window at the screen
+surface while placing the remaining desktop slightly behind it. Click another
+window to change the foreground. Press **Escape** or the activation shortcut to
+exit. Opening the macdissey menu stops 3D before displaying the menu.
+
+The effect uses two flat depth layers and keeps normal window and pointer
+positions. It targets up to 60 captured frames per second; actual performance
+depends on the Mac and what is on screen. Rounded corners, translucent windows,
+and an automatically hidden Dock can have imperfect depth boundaries. Menus,
+Spaces, focus transitions, and text readability still need broader testing.
+There is no perspective change as you move your head. The usual shortcut starts
+SBS video mode; desktop mode is activated separately from the menu.
 
 ## Building
 
@@ -97,8 +124,19 @@ sh scripts/build-app.sh
 open "dist/macdissey 3d.app"
 ```
 
-The resulting app is locally ad-hoc signed. The internal executable name and
-bundle identifier remain stable to preserve existing settings and permissions.
+By default, the app is ad-hoc signed. Its bundle identifier preserves settings,
+but ad-hoc signatures change identity when code changes and may require granting
+screen recording permission again. For development, set
+`MACDISSEY_SIGNING_IDENTITY` to a persistent code-signing identity in your Keychain.
+The build also supports a private local identity configured in the ignored
+`.local-assets/signing/identity.json`; its `identity`, `keychain`, and `passwordFile`
+fields identify a dedicated signing keychain. Signing failures stop the build;
+they never silently fall back to ad-hoc signing. Set the environment variable to
+`-` explicitly when packaging an ad-hoc build for distribution.
+
+Keep only one launchable installation registered with macOS. Launching test
+bundles with the same identifier can make permission-driven relaunches select
+the wrong copy. Store backups with a suffix such as `.app.backup`.
 See [Third-party notices](THIRD_PARTY_NOTICES.md) for dependency attribution.
 
 ## Checks
@@ -108,7 +146,8 @@ sh scripts/check.sh
 ```
 
 The compact suite checks fragmented controller replies, malformed calibration,
-display color conversion, shortcut persistence/conflicts, and settings layout.
+display color conversion, desktop layer composition, CPU/GPU upload equivalence,
+shortcut persistence/conflicts, window layout, alert dismissal, and display changes.
 It needs macOS with a logged-in graphical session, but does not enable the lenses
 or require private model assets. Checks are standalone executables because the
 Command Line Tools installation does not include XCTest.
@@ -122,6 +161,8 @@ An optional hardware integration check is available in a built app:
 Quit the regular app before running it. This check uses the connected monitor,
 camera, and screen-capture permission, briefly switches to 4K, and restores the
 display afterward. It keeps the lenses off and does not establish optical quality.
+Use `--desktop-smoke-test` instead for desktop mode; add `--extended-check` to run
+either integration check for 60 seconds.
 
 ## Source layout
 
@@ -133,7 +174,7 @@ display afterward. It keeps the lenses off and does not establish optical qualit
 | `Sources/OdysseyVision` | Native OpenCV pose and image processing |
 | `Sources/OdysseyInference` | Native LiteRT and ONNX Runtime adapters |
 | `Sources/OdysseyGL` | OpenGL interface for the original weaver shaders |
-| `Sources/OdysseyRendering` | Display color conversion |
+| `Sources/OdysseyRendering` | Display color conversion and desktop composition |
 | `Sources/OdysseyMonitor` | Optional monitor notification bridge client |
 | `Resources` | App metadata, original icon artwork, and license texts |
 | `Tests` | Small regression suite using synthetic inputs |
