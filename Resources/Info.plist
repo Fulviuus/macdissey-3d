@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>OdysseyMenu</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.odyssey3d.research</string>
+	<key>CFBundleName</key>
+	<string>macdissey 3d</string>
+	<key>CFBundleDisplayName</key>
+	<string>macdissey 3d</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.1</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>macdissey 3d uses the monitor’s stereo camera to position the glasses-free 3D image for your eyes. Camera images stay on this Mac.</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+</dict>
+</plist>

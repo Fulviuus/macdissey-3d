@@ -1,0 +1,34 @@
+# Build output and downloaded dependencies
+.build/
+.cache/
+.tools/
+.swiftpm/
+dist/
+__pycache__/
+.ruff_cache/
+*.pyc
+# Private vendor assets, device captures, and research
+.local-assets/
+research/
+Binary/
+*.pcap
+*.pcapng
+*.dmp
+*.qcow2
+*.utm/
+.env
+.env.*
+# Local task history and assistant configuration
+.beads/
+.agents/
+.codex/
+.claude/
+# Generated icons (master artwork is tracked)
+Resources/AppIcon.icns
+Resources/MenuBarIcon.png
+# macOS and editors
+.DS_Store
+._*
+*.swp
+.idea/
+.vscode/
