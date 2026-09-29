@@ -21,6 +21,24 @@ The desktop can use another resolution or scaling setting. During 3D playback,
 the app selects a native 4K pixel mode and restores the previous mode on exit.
 Arbitrary scaled output is not supported for the final optical rendering.
 
+## Install the app
+
+Download the Apple silicon ZIP from [Releases](https://github.com/Fulviuus/macdissey-3d/releases/latest),
+unzip it, and drag **macdissey 3d.app** into **Applications**.
+
+**The app is not signed with an Apple Developer ID or notarized by Apple.**
+macOS Gatekeeper may block the first launch. If you trust this download:
+
+1. Open the app once, then dismiss the security alert.
+2. Go to **System Settings → Privacy & Security** and scroll to **Security**.
+3. Click **Open Anyway** beside the message about macdissey 3d, authenticate if
+   prompted, and confirm **Open**.
+
+This approves this app individually. See [Apple's instructions](https://support.apple.com/en-gb/102445).
+Then grant **Camera** and **Screen Recording** (called **Screen & System Audio
+Recording** on newer macOS versions) permissions when prompted. Quit and reopen
+the app after changing permissions if requested.
+
 ## Watching a video
 
 1. Open an SBS video in a player and make it fullscreen on the Odyssey.

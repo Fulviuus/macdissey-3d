@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import urllib.request
@@ -21,13 +22,15 @@ STAMP = PREFIX / "odyssey-build.json"
 
 def main():
     sdk = subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()
+    # OpenCV includes __FILE__ in error messages. Keep local build paths private.
+    compiler_flags = "-ffp-contract=off " + shlex.quote(f"-ffile-prefix-map={ROOT}=.")
     options = {
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_INSTALL_PREFIX": str(PREFIX),
         "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0",
-        "CMAKE_CXX_FLAGS": "-ffp-contract=off",
-        "CMAKE_C_FLAGS": "-ffp-contract=off",
+        "CMAKE_CXX_FLAGS": compiler_flags,
+        "CMAKE_C_FLAGS": compiler_flags,
         "BUILD_LIST": "core,imgproc,calib3d",
         "BUILD_SHARED_LIBS": "OFF",
         "BUILD_TESTS": "OFF",
@@ -61,7 +64,7 @@ def main():
         },
     }
     stamp = {
-        "build_revision": 2,
+        "build_revision": 3,
         "source_sha256": SHA,
         "architecture": platform.machine(),
         "options": options,
@@ -102,6 +105,11 @@ def main():
             stdout=output,
             stderr=subprocess.STDOUT,
         )
+        # The generated build-information string also records compiler flags
+        # and the install prefix. Scrub that diagnostic text, not library code.
+        for relative in ("version_string.tmp", "modules/core/version_string.inc"):
+            info = BUILD / relative
+            info.write_text(info.read_text().replace(str(ROOT), "."))
         subprocess.run(
             [
                 "cmake",

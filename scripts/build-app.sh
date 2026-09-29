@@ -13,7 +13,7 @@ python3 scripts/prepare-inference.py
 python3 scripts/prepare-face-inference.py
 python3 scripts/prepare-archive.py
 sh scripts/build-icon.sh
-swift build -c release --product OdysseyMenu
+swift build -c release --product OdysseyMenu -Xswiftc -file-prefix-map -Xswiftc "$PWD=."
 bundle="${1:-$PWD/dist/macdissey 3d.app}"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 mkdir -p "$bundle/Contents/Resources/Models" "$bundle/Contents/Resources/Weaver"
@@ -41,6 +41,8 @@ mkdir -p "$bundle/Contents/Resources/7-Zip-Licenses"
 cp -f .tools/sevenzip-native/licenses/* "$bundle/Contents/Resources/7-Zip-Licenses/"
 install_name_tool -delete_rpath "$PWD/.tools/litert-native/lib" "$bundle/Contents/MacOS/OdysseyMenu"
 install_name_tool -delete_rpath "$PWD/.tools/onnx-native/lib" "$bundle/Contents/MacOS/OdysseyMenu"
+# Remove debug symbols before applying the final bundle signature.
+strip -S "$bundle/Contents/MacOS/OdysseyMenu"
 codesign --force --sign - "$bundle/Contents/Frameworks/libLiteRt.dylib"
 codesign --force --sign - "$bundle/Contents/Frameworks/libonnxruntime.1.dylib"
 codesign --force --sign - "$bundle/Contents/MacOS/7zz"

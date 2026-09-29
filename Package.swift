@@ -7,6 +7,7 @@ let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let vision = root + "/.tools/opencv43-install"
 let inference = root + "/.tools/litert-native"
 let faceInference = root + "/.tools/onnx-native"
+let portablePaths = "-ffile-prefix-map=\(root)=."
 
 let package = Package(
   name: "Macdissey3D",
@@ -16,7 +17,7 @@ let package = Package(
     .target(
       name: "OdysseyVision",
       cxxSettings: [
-        .unsafeFlags(["-I" + vision + "/include/opencv4", "-ffp-contract=off"])
+        .unsafeFlags(["-I" + vision + "/include/opencv4", "-ffp-contract=off", portablePaths])
       ],
       linkerSettings: [
         .unsafeFlags(["-L" + vision + "/lib", "-L" + vision + "/lib/opencv4/3rdparty"]),
@@ -29,6 +30,7 @@ let package = Package(
       cxxSettings: [
         .unsafeFlags([
           "-I" + inference + "/include", "-I" + faceInference + "/include", "-ffp-contract=off",
+          portablePaths,
         ])
       ],
       linkerSettings: [
@@ -43,7 +45,9 @@ let package = Package(
       ]),
     .target(name: "OdysseyCore", dependencies: ["OdysseyVision", "OdysseyInference"]),
     .target(name: "OdysseyCamera", dependencies: ["OdysseyCore"]),
-    .target(name: "OdysseyGL", linkerSettings: [.linkedFramework("OpenGL")]),
+    .target(
+      name: "OdysseyGL", cxxSettings: [.unsafeFlags([portablePaths])],
+      linkerSettings: [.linkedFramework("OpenGL")]),
     .target(name: "OdysseyRendering", dependencies: ["OdysseyCore"]),
     .target(name: "OdysseyMonitor"),
     .executableTarget(
