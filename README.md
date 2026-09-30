@@ -64,13 +64,13 @@ The monochrome menu bar icon adapts to the system appearance.
 Protected video may not be available to ScreenCaptureKit. The app does not bypass
 capture restrictions imposed by a player or streaming service.
 
-## Desktop 3D — experimental gimmick
+## Desktop 3D — experimental
 
-**Desktop 3D is a gimmick for having fun with desktop depth.** It remains
-experimental: expect rough edges and higher resource use than ordinary desktop
-work. SBS video playback remains the app's main purpose.
+**Desktop 3D adds an experimental depth effect to your windows.** Expect rough
+edges and higher resource use than ordinary desktop work. SBS video playback
+remains the app's main purpose.
 
-Choose **Try Desktop 3D (Experimental Gimmick)** to keep the front window at the screen
+Choose **Try Desktop 3D (Experimental)** to keep the front window at the screen
 surface while placing the remaining desktop slightly behind it. Click another
 window to change the foreground. Press **Escape** or the activation shortcut to
 exit. Opening the macdissey menu stops 3D before displaying the menu.
@@ -185,3 +185,10 @@ deprecated by Apple; its compiler deprecation warnings are expected.
 
 The optional notification bridge is inactive unless its separately managed local
 helper is present. Normal playback does not require installing that helper.
+
+## License
+
+The original macdissey 3d source code is available under the [MIT License](LICENSE).
+Third-party components retain their own licenses; see
+[Third-party notices](THIRD_PARTY_NOTICES.md). Recovered vendor models, shaders,
+and per-monitor calibration are not covered by the project’s MIT license.

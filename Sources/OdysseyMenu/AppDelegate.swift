@@ -137,10 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     toggle.isEnabled = !changing
     toggle.toolTip = running ? threeDStatus : factoryStatus
     menu.addItem(toggle)
-    let desktop = item("Try Desktop 3D (Experimental Gimmick)", #selector(toggleDesktop))
+    let desktop = item("Try Desktop 3D (Experimental)", #selector(toggleDesktop))
     desktop.isEnabled = !running && !changing
     desktop.toolTip =
-      "An experimental gimmick that puts the background behind the front window. Escape exits."
+      "An experimental depth effect that puts the background behind the front window. Escape exits."
     menu.addItem(desktop)
     menu.addItem(.separator())
     for layout in [SBSLayout.halfWidth, .fullWidth] {
@@ -297,7 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let alert = NSAlert()
       alert.messageText = "macdissey 3d"
       alert.informativeText =
-        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nDesktop 3D is an experimental gimmick for trying a simple depth effect on your windows.\n\nVersion \(version)"
+        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
       alert.icon = NSApp.applicationIconImage
       alert.addButton(withTitle: "OK")
       alerts.present(alert)

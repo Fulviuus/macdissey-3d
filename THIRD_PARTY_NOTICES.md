@@ -1,5 +1,8 @@
 # Third-party notices
 
+The project’s MIT license covers its original source code. It does not replace
+the licenses of the components below or license recovered vendor assets.
+
 ## ONNX Runtime 1.30.0 and detector ordering
 
 The native face inference library is ONNX Runtime 1.30.0, under the MIT license.
