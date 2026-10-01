@@ -5,7 +5,7 @@ import ServiceManagement
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let shortcutValue = NSTextField(labelWithString: "")
   private let shortcutHelp = NSTextField(
-    wrappingLabelWithString: "Toggle 3D from any app. Press Esc to stop 3D.")
+    wrappingLabelWithString: "Start SBS video from any app, or stop the active 3D mode.")
   private let editButton = NSButton(title: "Edit Shortcut…", target: nil, action: nil)
   private let loginSwitch = NSSwitch()
   private let loginHelp = NSTextField(
@@ -24,7 +24,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     self.currentShortcut = currentShortcut
     self.applyShortcut = applyShortcut
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+      contentRect: NSRect(x: 0, y: 0, width: 540, height: 650),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "macdissey 3d Settings"
     window.isReleasedWhenClosed = false
@@ -60,10 +60,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let spacer = NSView()
     let loginRow = NSStackView(views: [loginLabel, spacer, loginSwitch])
     loginRow.orientation = .horizontal
-    let shortcutLabel = NSTextField(labelWithString: "Current shortcut")
+    let shortcutLabel = NSTextField(labelWithString: "SBS video shortcut")
     shortcutLabel.font = .systemFont(ofSize: 13, weight: .semibold)
     shortcutValue.font = .systemFont(ofSize: 20, weight: .medium)
-    shortcutValue.setAccessibilityLabel("Current shortcut")
+    shortcutValue.setAccessibilityLabel("SBS video shortcut")
     editButton.target = self
     editButton.action = #selector(editShortcut)
     editButton.bezelStyle = .rounded
@@ -78,16 +78,60 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     approvalButton.bezelStyle = .rounded
     let divider = NSBox()
     divider.boxType = .separator
-    let stack = NSStackView(views: [
-      title, loginRow, loginHelp, approvalButton,
-      divider, shortcutLabel, shortcutRow, shortcutHelp,
-    ])
+    let conversionTitle = NSTextField(labelWithString: "2D video conversion (Experimental)")
+    conversionTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+    func referenceRow(_ action: String, _ keys: String) -> NSStackView {
+      let label = NSTextField(labelWithString: action)
+      let value = NSTextField(labelWithString: keys)
+      value.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
+      value.setAccessibilityLabel(action + " shortcut")
+      let row = NSStackView(views: [label, NSView(), value])
+      row.orientation = .horizontal
+      return row
+    }
+    let references = [
+      referenceRow("Start conversion / stop 3D", "⌃⇧2"),
+      referenceRow("Show Depth and Pop-Out values", "⌃⇧1"),
+      referenceRow("Decrease 3D Depth", "⌃⇧3"),
+      referenceRow("Increase 3D Depth", "⌃⇧4"),
+      referenceRow("Decrease Pop-Out", "⌃⇧5"),
+      referenceRow("Increase Pop-Out", "⌃⇧6"),
+    ]
+    let conversionHelp = NSTextField(
+      wrappingLabelWithString:
+        "Depth, Pop-Out and the values overlay work only during 2D video conversion. These shortcuts are fixed."
+    )
+    let exitRow = referenceRow("Stop any 3D mode", "Esc")
+    let keyLegend = NSTextField(labelWithString: "⌃ Control    ⇧ Shift    ⌥ Option    ⌘ Command")
+    let menuHelp = NSTextField(
+      wrappingLabelWithString:
+        "Use the menu for Desktop 3D, picture layout and Quit. Opening the menu also stops 3D.")
+    for label in [conversionHelp, keyLegend, menuHelp] {
+      label.font = .systemFont(ofSize: 12)
+      label.textColor = .secondaryLabelColor
+    }
+    let conversionDivider = NSBox()
+    conversionDivider.boxType = .separator
+    let exitDivider = NSBox()
+    exitDivider.boxType = .separator
+    let stack = NSStackView(
+      views: [
+        title, loginRow, loginHelp, approvalButton,
+        divider, shortcutLabel, shortcutRow, shortcutHelp,
+        conversionDivider, conversionTitle,
+      ] + references + [conversionHelp, exitDivider, exitRow, keyLegend, menuHelp])
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 12
+    stack.spacing = 10
     stack.setCustomSpacing(20, after: title)
     stack.translatesAutoresizingMaskIntoConstraints = false
     content.addSubview(stack)
+    for view in references + [exitRow] {
+      view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+    for view in [conversionHelp, menuHelp, conversionDivider, exitDivider] {
+      view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -105,7 +149,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let status = SMAppService.mainApp.status
     loginSwitch.state = status == .enabled || status == .requiresApproval ? .on : .off
     approvalButton.isHidden = status != .requiresApproval
-    window?.setContentSize(NSSize(width: 460, height: status == .requiresApproval ? 400 : 360))
+    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 690 : 650))
     loginHelp.stringValue =
       status == .requiresApproval
       ? "Allow macdissey 3d in Login Items to finish enabling launch at login."
@@ -174,7 +218,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
     editButton.title = "Edit Shortcut…"
     refreshShortcut()
-    shortcutHelp.stringValue = "Toggle 3D from any app. Press Esc to stop 3D."
+    shortcutHelp.stringValue = "Start SBS video from any app, or stop the active 3D mode."
   }
   func windowWillClose(_ notification: Notification) { cancelRecording() }
   func windowDidResignKey(_ notification: Notification) { cancelRecording() }

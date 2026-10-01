@@ -23,6 +23,19 @@ OdysseyDepthModel *odyssey_depth_create(const char *path, int *status);
 void odyssey_depth_destroy(OdysseyDepthModel *model);
 int odyssey_depth_invoke(OdysseyDepthModel *model, const float *input, size_t input_count,
                          float *output, size_t output_count);
+// Original monocular video-depth models, separate from camera tracking.
+// Returns the validated square input side (256 or 518). RGB NCHW float input
+// must already be normalized; output is one unscaled depth/disparity plane.
+// Each instance must be used by one serial processing queue.
+typedef struct OdysseyMonocularDepth OdysseyMonocularDepth;
+OdysseyMonocularDepth *odyssey_monocular_create(const char *path, int *side, int *status);
+// Same weights with Core ML GPU acceleration. Cache must be a writable private
+// directory; returns null on failure so the caller can select the CPU path.
+OdysseyMonocularDepth *odyssey_monocular_create_accelerated(const char *path, const char *cache,
+                                                            int *side, int *status);
+void odyssey_monocular_destroy(OdysseyMonocularDepth *model);
+int odyssey_monocular_invoke(OdysseyMonocularDepth *model, const float *input, size_t input_count,
+                             float *output, size_t output_count);
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,6 @@
 import AppKit
 import OdysseyCamera
+import OdysseyConversion
 import OdysseyCore
 import OdysseyRendering
 import ScreenCaptureKit
@@ -7,6 +8,7 @@ import ScreenCaptureKit
 private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegate {
   weak var renderer: GLSBSRenderer?
   var colors: DisplayColorPipeline?
+  var converter: VideoConverter?
   private var reportedColorSpace = false
   var failure: ((Error) -> Void)?
   func stream(
@@ -31,13 +33,14 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
         fflush(stdout)
         reportedColorSpace = true
       }
-      renderer?.submit(try colors.convert(pixel, from: sourceSpace))
+      let converted = try colors.convert(pixel, from: sourceSpace)
+      if let converter { converter.submit(converted) } else { renderer?.submit(converted) }
     } catch { failure?(error) }
   }
   func stream(_ stream: SCStream, didStopWithError error: Error) { failure?(error) }
 }
 
-enum PresentationMode { case video, desktop }
+enum PresentationMode { case video, desktop, conversion }
 
 @MainActor final class ThreeDSession {
   private var stream: SCStream?, sink: ThreeDCaptureSink?, window: NSWindow?,
@@ -46,12 +49,14 @@ enum PresentationMode { case video, desktop }
   private var savedMode: CGDisplayMode?, displayID: CGDirectDisplayID = 0
   private var watchdog: OutputWatchdogClient?
   private var desktopCapture: DesktopCapture?
+  private var converter: VideoConverter?
   private let captureQueue = DispatchQueue(label: "Odyssey.3D-capture", qos: .userInteractive)
   var failure: ((Error) -> Void)?
   var status: ((String) -> Void)?
   var allowsLensActivation = true
   var mode: PresentationMode = .video
   var renderedFrames: Int { renderer?.renderedFrames ?? 0 }
+  var convertedFrames: Int { converter?.convertedFrames ?? 0 }
   var layout = SBSLayout.fullWidth { didSet { if mode == .video { renderer?.layout = layout } } }
   private var weaving = false
   private var outputDisplayState: OutputDisplayState?
@@ -115,7 +120,21 @@ enum PresentationMode { case video, desktop }
         let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
       else { throw WeaverRenderFailure.unavailable }
       self.renderer = renderer
-      renderer.layout = mode == .desktop ? .halfWidth : layout
+      renderer.layout = mode == .video ? layout : .halfWidth
+      if mode == .conversion {
+        let assets = resources.appendingPathComponent("Conversion")
+        let reportFailure: (Error) -> Void = { [weak self] error in
+          Task { @MainActor in self?.failure?(error) }
+        }
+        converter = try await Task.detached {
+          try VideoConverter(
+            assets: assets,
+            deliver: { [weak renderer] pixel in
+              Task { @MainActor in renderer?.submit(pixel) }
+            }, failure: reportFailure)
+        }.value
+        try Task.checkCancellation()
+      }
       renderer.failure = { [weak self] error in self?.failure?(error) }
       renderer.presented = { [weak self, weak lens] valid in
         guard let self else { return }
@@ -169,11 +188,12 @@ enum PresentationMode { case video, desktop }
         let sink = ThreeDCaptureSink()
         sink.renderer = renderer
         sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
+        sink.converter = converter
         sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
         self.sink = sink
         let config = SCStreamConfiguration()
-        config.width = 3840
-        config.height = 2160
+        config.width = mode == .conversion ? 1920 : 3840
+        config.height = mode == .conversion ? 1080 : 2160
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         config.queueDepth = 3
         // The default capture colour space is the display's own profile.
@@ -219,6 +239,8 @@ enum PresentationMode { case video, desktop }
     if let stream { try? await stream.stopCapture() }
     stream = nil
     sink = nil
+    await converter?.stop()
+    converter = nil
     if let camera { await Task.detached { camera.stop() }.value }
     camera = nil
     renderer = nil
@@ -231,5 +253,9 @@ enum PresentationMode { case video, desktop }
     displayID = 0
     watchdog?.stop()
     watchdog = nil
+  }
+
+  func adjustConversion(depth: Int = 0, popOut: Int = 0) {
+    converter?.adjust(depth: depth, popOut: popOut)
   }
 }

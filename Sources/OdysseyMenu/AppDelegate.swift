@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var hotKey: HotKey?
   private var nextHotKeyID: UInt32 = 10
   private var escapeKey: HotKey?
+  private var conversionKey: HotKey?
+  private var conversionControls: [HotKey] = []
   private var running = false
   private var changing = false
   private var stopping = false
@@ -55,6 +57,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     rebuildMenu()
     loadFactoryProfile()
     do { try changeShortcut(to: shortcut) } catch { show(error.localizedDescription) }
+    do {
+      conversionKey = try HotKey(
+        keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(controlKey | shiftKey), id: 400
+      ) { [weak self] in
+        self?.toggleConversion()
+      }
+    } catch {
+      logger.error(
+        "2D conversion shortcut unavailable: \(error.localizedDescription, privacy: .public)")
+    }
     threeD.failure = { [weak self] error in
       self?.stop3D(message: error.localizedDescription, reason: "pipeline error")
     }
@@ -137,6 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     toggle.isEnabled = !changing
     toggle.toolTip = running ? threeDStatus : factoryStatus
     menu.addItem(toggle)
+    let conversion = item("Convert 2D Video to 3D (Experimental)", #selector(toggleConversion))
+    conversion.isEnabled = !running && !changing
+    conversion.toolTip = "Control–Shift–2. Converts a fullscreen ordinary video; Escape exits."
+    menu.addItem(conversion)
     let desktop = item("Try Desktop 3D (Experimental)", #selector(toggleDesktop))
     desktop.isEnabled = !running && !changing
     desktop.toolTip =
@@ -147,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let option = item(layout.title, #selector(selectLayout(_:)))
       option.tag = layout.rawValue
       option.state = threeD.layout == layout ? .on : .off
-      option.isEnabled = !(running && threeD.mode == .desktop)
+      option.isEnabled = !(running && threeD.mode != .video)
       option.toolTip =
         layout == .halfWidth
         ? "Stretch each complete eye view to fill the screen."
@@ -197,6 +213,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     activate3D(mode: .desktop)
   }
 
+  @objc private func toggleConversion() {
+    guard !settings.isRecording else { return }
+    if !running && !changing
+      && Bundle.main.url(forResource: "model", withExtension: "onnx", subdirectory: "Conversion")
+        == nil
+    {
+      show("This build does not include the private 2D conversion assets.")
+      return
+    }
+    activate3D(mode: .conversion)
+  }
+
+  private func registerConversionControls() throws {
+    let bindings: [(Int, Int, Int)] = [
+      (kVK_ANSI_1, 0, 0), (kVK_ANSI_3, -1, 0), (kVK_ANSI_4, 1, 0), (kVK_ANSI_5, 0, -1),
+      (kVK_ANSI_6, 0, 1),
+    ]
+    conversionControls = try bindings.enumerated().map { index, binding in
+      try HotKey(
+        keyCode: UInt32(binding.0), modifiers: UInt32(controlKey | shiftKey),
+        id: UInt32(410 + index)
+      ) { [weak self] in
+        guard let self, self.running, self.threeD.mode == .conversion else { return }
+        self.threeD.adjustConversion(depth: binding.1, popOut: binding.2)
+      }
+    }
+  }
+
   private func activate3D(mode: PresentationMode) {
     guard !stopping, !settings.isRecording else { return }
     if running || changing {
@@ -212,7 +256,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       escapeKey = try HotKey(keyCode: UInt32(kVK_Escape), modifiers: 0, id: 2) { [weak self] in
         self?.stop3D()
       }
+      if mode == .conversion { try registerConversionControls() }
     } catch {
+      escapeKey = nil
+      conversionControls = []
       show(error.localizedDescription)
       return
     }
@@ -230,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       } catch {
         running = false
         escapeKey = nil
+        conversionControls = []
         threeDStatus = "3D is off"
         if !(error is CancellationError) { failureMessage = error.localizedDescription }
       }
@@ -256,6 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       stopping = false
       threeDStatus = "3D is off"
       escapeKey = nil
+      conversionControls = []
       rebuildMenu()
       if terminationPending {
         NSApp.reply(toApplicationShouldTerminate: true)
@@ -297,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let alert = NSAlert()
       alert.messageText = "macdissey 3d"
       alert.informativeText =
-        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
+        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nConvert ordinary fullscreen 2D video with Control–Shift–2 (Experimental). During conversion, Control–Shift–3/4 adjusts Depth and Control–Shift–5/6 adjusts Pop-Out.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
       alert.icon = NSApp.applicationIconImage
       alert.addButton(withTitle: "OK")
       alerts.present(alert)

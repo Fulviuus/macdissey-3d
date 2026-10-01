@@ -58,11 +58,64 @@ Use **Stretch to fill** for videos whose two eye views are horizontally squeezed
 Use **Remove black bars** for full-width SBS video displayed with top and bottom
 bars. This crops the bars before filling the screen.
 
-**Settings** contains **Launch at login** and the keyboard shortcut editor.
+**VLC on macOS:** enable **Use the native fullscreen mode** in VLC's
+**Preferences → Interface**, save, and restart VLC before entering fullscreen.
+With VLC 3.0.23, this resolved horizontal misalignment and spillover between the
+eye views observed with its legacy fullscreen mode.
+
+**Settings** contains **Launch at login**, the SBS shortcut editor, and a reference
+for every keyboard shortcut, including conversion controls and how to exit.
 The monochrome menu bar icon adapts to the system appearance.
 
 Protected video may not be available to ScreenCaptureKit. The app does not bypass
 capture restrictions imposed by a player or streaming service.
+
+## Keyboard shortcuts
+
+Shortcuts work from other apps, including fullscreen players. In Settings,
+**⌃** means Control, **⇧** Shift, **⌥** Option, and **⌘** Command.
+
+| Action | Shortcut | Available in |
+| --- | --- | --- |
+| Start SBS video / stop the active 3D mode | Control–Option–Command–3 (customizable in Settings) | Any app |
+| Start 2D conversion / stop the active 3D mode | Control–Shift–2 | Any app |
+| Show Depth and Pop-Out values | Control–Shift–1 | Active 2D conversion |
+| Decrease 3D Depth | Control–Shift–3 | Active 2D conversion |
+| Increase 3D Depth | Control–Shift–4 | Active 2D conversion |
+| Decrease Pop-Out | Control–Shift–5 | Active 2D conversion |
+| Increase Pop-Out | Control–Shift–6 | Active 2D conversion |
+| Stop any 3D mode | Escape | Any active 3D mode |
+
+Conversion shortcuts are fixed. Desktop 3D, picture layout, and Quit are available
+from the menu. Opening the macdissey menu also stops 3D. While editing the SBS
+shortcut in Settings, Escape cancels recording the new shortcut.
+
+## 2D video conversion — experimental
+
+The app can synthesize two eye views from an ordinary fullscreen
+2D video. Choose **Convert 2D Video to 3D (Experimental)** or press
+**Control–Shift–2**. Press **Escape** or open the app menu to stop.
+
+The original player shortcuts listed above control the effect, with values
+appearing briefly in the image. Depth changes the separation between the
+synthesized views; Pop-Out moves the depth range relative to the screen. These
+controls apply only to conversion, not to recorded SBS video or Desktop 3D.
+
+This port uses the recovered Samsung Player 1.5.0 fast depth model and conversion
+stages, translated to Metal, with the recovered control formulas. It processes
+1920 × 1080 pixels per eye before native 4K weaving. It is an experimental native
+port: playback and smoothness have been verified on one setup, and numerical
+checks cover individual stages. Complete Windows output equivalence has not been
+established. Performance and estimated depth depend on the scene and Mac.
+
+Image processing uses batched Metal commands. Depth inference uses Core ML with
+GPU acceleration, falling back to the CPU if accelerated initialization fails.
+The weights remain unchanged, although accelerator arithmetic can produce small
+numerical differences. The first activation can take several seconds to compile
+the model; compiled models are cached locally for subsequent activations.
+
+Conversion is included in v0.5.0 and later. Building it from source requires the
+additional private assets described below.
 
 ## Desktop 3D — experimental
 
@@ -114,6 +167,12 @@ python3 scripts/import-assets.py "/path/to/macdissey 3d.app"
 ```
 
 Alternatively, set `MACDISSEY_ASSETS` to a directory with the same structure.
+For experimental 2D conversion, also supply `Conversion/model.onnx` (the recovered
+fast model), `Conversion/samples8.f32`, and `Conversion/Shaders/` (the translated
+conversion programs). These vendor assets are optional, remain private, and are
+not supplied or extracted by the public build scripts. The four-file import
+command above does not import conversion assets.
+
 Assets stay local and are ignored by Git. Per-monitor calibration is read from the
 connected monitor at runtime and cached in
 `~/Library/Application Support/Odyssey3D/Calibration`; it is never part of the
@@ -148,6 +207,9 @@ sh scripts/check.sh
 The compact suite checks fragmented controller replies, malformed calibration,
 display color conversion, desktop layer composition, CPU/GPU upload equivalence,
 shortcut persistence/conflicts, window layout, alert dismissal, and display changes.
+It also checks conversion control ranges. Set `MACDISSEY_CONVERSION_ASSETS` to
+the private `Conversion` directory to additionally exercise model inference,
+stereo synthesis, paused-frame adjustment, and shutdown with synthetic input.
 It needs macOS with a logged-in graphical session, but does not enable the lenses
 or require private model assets. Checks are standalone executables because the
 Command Line Tools installation does not include XCTest.
@@ -163,6 +225,7 @@ camera, and screen-capture permission, briefly switches to 4K, and restores the
 display afterward. It keeps the lenses off and does not establish optical quality.
 Use `--desktop-smoke-test` instead for desktop mode; add `--extended-check` to run
 either integration check for 60 seconds.
+Use `--conversion-smoke-test` for 2D conversion when its private assets are present.
 
 ## Source layout
 
@@ -173,6 +236,7 @@ either integration check for 60 seconds.
 | `Sources/OdysseyCamera` | Stereo camera acquisition and tracking pipeline |
 | `Sources/OdysseyVision` | Native OpenCV pose and image processing |
 | `Sources/OdysseyInference` | Native LiteRT and ONNX Runtime adapters |
+| `Sources/OdysseyConversion` | Experimental monocular depth and stereo synthesis |
 | `Sources/OdysseyGL` | OpenGL interface for the original weaver shaders |
 | `Sources/OdysseyRendering` | Display color conversion and desktop composition |
 | `Sources/OdysseyMonitor` | Optional monitor notification bridge client |

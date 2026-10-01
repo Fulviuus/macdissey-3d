@@ -5,7 +5,8 @@ the licenses of the components below or license recovered vendor assets.
 
 ## ONNX Runtime 1.30.0 and detector ordering
 
-The native face inference library is ONNX Runtime 1.30.0, under the MIT license.
+Face inference and monocular video-depth inference use ONNX Runtime 1.30.0,
+under the MIT license. Video conversion also uses Apple's system Core ML framework.
 Its license and bundled dependency notices are included in the application at
 `Contents/Resources/ONNX-Runtime-Licenses/`.
 
@@ -80,6 +81,12 @@ The private local build copies the recovered vendor face and landmark weights
 and the original GLSL shaders from the user's installation into its Resources.
 These vendor assets are not covered by the open-source runtime licenses above.
 The source repository does not contain those weights or shader resources.
+
+Experimental 2D conversion uses recovered Samsung Player 1.5.0 depth weights,
+sampling data, and conversion shader programs translated for Metal. These vendor
+resources likewise retain their own terms and are excluded from the project's
+MIT license and source repository. Core ML compilation caches stay on the user's
+Mac and are not bundled.
 ## Native archive helper
 
 The local application bundle includes the separately executed 7-Zip 26.03

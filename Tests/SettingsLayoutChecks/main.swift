@@ -29,7 +29,11 @@ enum SettingsLayoutChecks {
       return labels
     }
     let labels = inspect(content)
-    for expected in ["Settings", "Launch at login", "Current shortcut", "⌃⌥⌘3"] {
+    for expected in [
+      "Settings", "Launch at login", "SBS video shortcut", "⌃⌥⌘3",
+      "2D video conversion (Experimental)", "⌃⇧1", "⌃⇧2", "⌃⇧3", "⌃⇧4", "⌃⇧5", "⌃⇧6",
+      "Stop any 3D mode", "Esc",
+    ] {
       precondition(labels.contains(expected), "Missing setting: \(expected)")
     }
     let image = content.bitmapImageRepForCachingDisplay(in: content.bounds)!

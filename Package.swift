@@ -49,11 +49,15 @@ let package = Package(
       name: "OdysseyGL", cxxSettings: [.unsafeFlags([portablePaths])],
       linkerSettings: [.linkedFramework("OpenGL"), .linkedFramework("IOSurface")]),
     .target(name: "OdysseyRendering", dependencies: ["OdysseyCore"]),
+    .target(name: "OdysseyConversion", dependencies: ["OdysseyInference"]),
     .target(name: "OdysseyMonitor"),
+    .executableTarget(
+      name: "ConversionChecks", dependencies: ["OdysseyConversion"], path: "Tests/ConversionChecks"),
     .executableTarget(
       name: "OdysseyMenu",
       dependencies: [
         "OdysseyCore", "OdysseyCamera", "OdysseyGL", "OdysseyRendering", "OdysseyMonitor",
+        "OdysseyConversion",
       ]),
     .executableTarget(
       name: "DisplayColorChecks", dependencies: ["OdysseyRendering"],

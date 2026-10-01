@@ -21,6 +21,13 @@ cp -f "$assets/Models/face.onnx" "$bundle/Contents/Resources/Models/face.onnx"
 cp -f "$assets/Models/landmarks.tflite" "$bundle/Contents/Resources/Models/landmarks.tflite"
 cp -f "$assets/Weaver/vertex.glsl" "$bundle/Contents/Resources/Weaver/vertex.glsl"
 cp -f "$assets/Weaver/fragment.glsl" "$bundle/Contents/Resources/Weaver/fragment.glsl"
+if [ -d "$bundle/Contents/Resources/Conversion" ]; then
+    rm -r "$bundle/Contents/Resources/Conversion"
+fi
+if [ -s "$assets/Conversion/model.onnx" ]; then
+    mkdir -p "$bundle/Contents/Resources/Conversion"
+    cp -R "$assets/Conversion/." "$bundle/Contents/Resources/Conversion/"
+fi
 cp -f .build/release/OdysseyMenu "$bundle/Contents/MacOS/OdysseyMenu"
 cp -f .tools/sevenzip-native/7zz "$bundle/Contents/MacOS/7zz"
 cp -f Resources/AppIcon.icns "$bundle/Contents/Resources/AppIcon.icns"
