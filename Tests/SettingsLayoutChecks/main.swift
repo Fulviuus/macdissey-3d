@@ -30,7 +30,7 @@ enum SettingsLayoutChecks {
     }
     let labels = inspect(content)
     for expected in [
-      "Settings", "Launch at login", "SBS video shortcut", "⌃⌥⌘3",
+      "Settings", "Launch at login", "Stereo video shortcut", "⌃⌥⌘3",
       "2D video conversion (Experimental)", "⌃⇧1", "⌃⇧2", "⌃⇧3", "⌃⇧4", "⌃⇧5", "⌃⇧6",
       "Stop any 3D mode", "Esc",
     ] {

@@ -28,6 +28,7 @@ if [ -s "$assets/Conversion/model.onnx" ]; then
     mkdir -p "$bundle/Contents/Resources/Conversion"
     cp -R "$assets/Conversion/." "$bundle/Contents/Resources/Conversion/"
 fi
+cp -R Resources/StereoShaders "$bundle/Contents/Resources/"
 cp -f .build/release/OdysseyMenu "$bundle/Contents/MacOS/OdysseyMenu"
 cp -f .tools/sevenzip-native/7zz "$bundle/Contents/MacOS/7zz"
 cp -f Resources/AppIcon.icns "$bundle/Contents/Resources/AppIcon.icns"

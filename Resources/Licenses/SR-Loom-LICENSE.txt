@@ -1,0 +1,64 @@
+MIT License
+
+Copyright (c) 2026 SR Loom contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This project links against the proprietary Simulated Reality / LeiaSR SDK,
+which is distributed under its own license (see the SDK's "Notices, Terms &
+Conditions"). The SR runtime must be installed separately; the SDK is not
+redistributed under the MIT terms above.
+
+Bundled third-party components (all permissive / MIT-compatible):
+  - Dear ImGui (third_party/imgui) : MIT License (Omar Cornut). The control
+    panel is built with it; see third_party/imgui/LICENSE.txt.
+  - Inter font (assets/fonts, embedded into the executable as a resource) :
+    SIL Open Font License 1.1 (The Inter Project Authors); see
+    assets/fonts/Inter-OFL.txt.
+  - third_party/stb_image.h : public domain / MIT (Sean Barrett), used for
+    image loading.
+  - third_party/one_euro_filter.h : "1 Euro Filter" -- speed-adaptive
+    low-pass filter by Gery Casiez, Nicolas Roussel, Daniel Vogel
+    (CHI 2012). Original BSD 3-Clause License (Casiez/Roussel 2019).
+    Used in the VR head-tracked viewer and the OpenTrack pipeline.
+  - SR OpenTrack Bridge (https://github.com/effcol/leia-track-app-XYZ) :
+    MIT License. The OpenTrack UDP sender (third_party/opentrack_udp.h)
+    and the head-pose -> OneEuro -> OpenTrack mapping pipeline
+    (third_party/opentrack_pipeline.h, src/OpenTrackBridge.{h,cpp}) are
+    ported from this project.
+  - NPClient.dll (TrackIR consumer API) : MIT License. Original author
+    "uglyDwarf" via the Linuxtrack project
+    (https://github.com/uglyDwarf/linuxtrack), subsequently maintained
+    in OpenTrack's contrib/npclient
+    (https://github.com/opentrack/opentrack). Vendored verbatim into
+    third_party/npclient/npclient.c (apart from an added attribution
+    header), built as a free-standing Windows DLL by CMake and embedded
+    into SRLoom.exe as RCDATA. Extracted at first launch to
+    %LOCALAPPDATA%\SRLoom\NPClient\ so TrackIR-compatible games can
+    load it without users installing OpenTrack separately.
+
+Attribution:
+  - The HDMI 1.4 frame-packing decode in src/Converter.cpp was informed by
+    "3DToElse" / "3DToElse_NTM3D.fx" by Jose Negrete (AKA BlueSkyDefender) with
+    modifications by NTM3D, which is licensed under the Creative Commons
+    Attribution 3.0 Unported License (CC BY 3.0,
+    https://creativecommons.org/licenses/by/3.0/). The decode here is an
+    independent re-implementation; this attribution is provided with thanks.

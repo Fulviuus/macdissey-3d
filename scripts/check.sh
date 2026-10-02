@@ -7,5 +7,6 @@ python3 scripts/prepare-face-inference.py
 for check in CoreChecks FactoryCalibrationChecks DisplayColorChecks DesktopCompositorChecks ConversionChecks; do
     swift run "$check"
 done
+swift run -c release StereoInputChecks
 swift run -c release GLSurfaceChecks
 sh scripts/check-app-settings.sh

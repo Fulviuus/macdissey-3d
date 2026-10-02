@@ -5,7 +5,7 @@ import ServiceManagement
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let shortcutValue = NSTextField(labelWithString: "")
   private let shortcutHelp = NSTextField(
-    wrappingLabelWithString: "Start SBS video from any app, or stop the active 3D mode.")
+    wrappingLabelWithString: "Start stereo video from any app, or stop the active 3D mode.")
   private let editButton = NSButton(title: "Edit Shortcut…", target: nil, action: nil)
   private let loginSwitch = NSSwitch()
   private let loginHelp = NSTextField(
@@ -15,16 +15,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private var eventMonitor: Any?
   private(set) var isRecording = false
   private let currentShortcut: () -> KeyboardShortcut
+  private let showStereoInput: () -> Void
   private let applyShortcut: (KeyboardShortcut) throws -> Void
 
   init(
     currentShortcut: @escaping () -> KeyboardShortcut,
-    applyShortcut: @escaping (KeyboardShortcut) throws -> Void
+    applyShortcut: @escaping (KeyboardShortcut) throws -> Void,
+    showStereoInput: @escaping () -> Void = {}
   ) {
     self.currentShortcut = currentShortcut
     self.applyShortcut = applyShortcut
+    self.showStereoInput = showStereoInput
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 540, height: 650),
+      contentRect: NSRect(x: 0, y: 0, width: 540, height: 690),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "macdissey 3d Settings"
     window.isReleasedWhenClosed = false
@@ -60,10 +63,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let spacer = NSView()
     let loginRow = NSStackView(views: [loginLabel, spacer, loginSwitch])
     loginRow.orientation = .horizontal
-    let shortcutLabel = NSTextField(labelWithString: "SBS video shortcut")
+    let shortcutLabel = NSTextField(labelWithString: "Stereo video shortcut")
     shortcutLabel.font = .systemFont(ofSize: 13, weight: .semibold)
     shortcutValue.font = .systemFont(ofSize: 20, weight: .medium)
-    shortcutValue.setAccessibilityLabel("SBS video shortcut")
+    shortcutValue.setAccessibilityLabel("Stereo video shortcut")
     editButton.target = self
     editButton.action = #selector(editShortcut)
     editButton.bezelStyle = .rounded
@@ -76,6 +79,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     approvalButton.target = self
     approvalButton.action = #selector(openLoginSettings)
     approvalButton.bezelStyle = .rounded
+    let stereoButton = NSButton(
+      title: "Stereo Input…", target: self, action: #selector(openStereoInput))
+    stereoButton.bezelStyle = .rounded
     let divider = NSBox()
     divider.boxType = .separator
     let conversionTitle = NSTextField(labelWithString: "2D video conversion (Experimental)")
@@ -117,7 +123,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let stack = NSStackView(
       views: [
         title, loginRow, loginHelp, approvalButton,
-        divider, shortcutLabel, shortcutRow, shortcutHelp,
+        divider, shortcutLabel, shortcutRow, shortcutHelp, stereoButton,
         conversionDivider, conversionTitle,
       ] + references + [conversionHelp, exitDivider, exitRow, keyLegend, menuHelp])
     stack.orientation = .vertical
@@ -145,11 +151,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     ])
   }
 
+  @objc private func openStereoInput() { showStereoInput() }
+
   @objc private func refreshLogin() {
     let status = SMAppService.mainApp.status
     loginSwitch.state = status == .enabled || status == .requiresApproval ? .on : .off
     approvalButton.isHidden = status != .requiresApproval
-    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 690 : 650))
+    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 730 : 690))
     loginHelp.stringValue =
       status == .requiresApproval
       ? "Allow macdissey 3d in Login Items to finish enabling launch at login."
@@ -218,7 +226,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
     editButton.title = "Edit Shortcut…"
     refreshShortcut()
-    shortcutHelp.stringValue = "Start SBS video from any app, or stop the active 3D mode."
+    shortcutHelp.stringValue = "Start stereo video from any app, or stop the active 3D mode."
   }
   func windowWillClose(_ notification: Notification) { cancelRecording() }
   func windowDidResignKey(_ notification: Notification) { cancelRecording() }

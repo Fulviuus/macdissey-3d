@@ -1,4 +1,5 @@
 import AppKit
+import OdysseyConversion
 
 @main
 enum MacdisseyMain {
@@ -33,6 +34,14 @@ enum MacdisseyMain {
         var failure: Error?
         session.failure = { failure = $0 }
         do {
+          if let index = CommandLine.arguments.firstIndex(of: "--stereo-format"),
+            CommandLine.arguments.indices.contains(index + 1),
+            let raw = Int(CommandLine.arguments[index + 1]),
+            let format = StereoInputFormat(rawValue: raw)
+          {
+            session.stereoSettings.format = format
+            session.layout = format == .fullSBS ? .fullWidth : .halfWidth
+          }
           guard let screen = NSScreen.screens.first(where: Hardware.isOdyssey),
             let port = Hardware.devices().first(where: { $0.vendorID == 0x354b })?.serialPort
           else {
@@ -42,7 +51,7 @@ enum MacdisseyMain {
           try await session.start(on: screen, profile: profile)
           let duration =
             CommandLine.arguments.contains("--extended-check")
-            ? 60 : (session.mode == .video ? 2 : 5)
+            ? 60 : 5
           for _ in 0..<duration {
             try await Task.sleep(nanoseconds: 1_000_000_000)
             if let failure { throw failure }
@@ -52,9 +61,14 @@ enum MacdisseyMain {
           }
           let frames = session.renderedFrames
           let conversions = session.convertedFrames
+          let decoded = session.decodedFrames
           await session.stop()
           if let failure { throw failure }
           guard frames > 0 else { throw AppError.unavailable("No frames rendered") }
+          if session.mode == .video && !session.stereoSettings.format.isSBS {
+            guard decoded > 0 else { throw AppError.unavailable("No stereo frames decoded") }
+            print("Decoded \(decoded) captured frames as \(session.stereoSettings.format.title).")
+          }
           if session.mode == .conversion {
             guard conversions > 0 else { throw AppError.unavailable("No converted frames") }
             print("Converted \(conversions) captured frames in \(duration) seconds.")

@@ -1,7 +1,7 @@
 import Foundation
 import Metal
 
-// Executes conversion programs loaded from private local assets.
+// Executes Metal image programs for vendor conversion and open-source stereo decoding.
 struct GPUFailure: LocalizedError, CustomStringConvertible {
   let description: String
   var errorDescription: String? { description }

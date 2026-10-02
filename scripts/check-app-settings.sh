@@ -21,3 +21,14 @@ result = subprocess.run([".build/settings-checks/AlertLifecycleChecks"],
 assert "PASS: Quit reaches" in result.stdout, result.stdout + result.stderr
 print(result.stdout, end="")
 PY
+
+# The settings model has no GPU dependencies; compile it alone for the AppKit check.
+swiftc -emit-library -emit-module -module-name OdysseyConversion \
+    Sources/OdysseyConversion/StereoInput.swift \
+    -emit-module-path .build/settings-checks/OdysseyConversion.swiftmodule \
+    -o .build/settings-checks/libOdysseyConversion.dylib
+swiftc -parse-as-library -I .build/settings-checks -L .build/settings-checks \
+    -lOdysseyConversion -Xlinker -rpath -Xlinker "$PWD/.build/settings-checks" \
+    Sources/OdysseyMenu/StereoInputSettingsWindowController.swift \
+    Tests/StereoSettingsLayoutChecks/main.swift -o .build/settings-checks/StereoSettingsLayoutChecks
+.build/settings-checks/StereoSettingsLayoutChecks .build/settings-checks/stereo-settings.png

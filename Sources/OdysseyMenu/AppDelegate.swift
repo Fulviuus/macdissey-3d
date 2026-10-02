@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import OSLog
+import OdysseyConversion
 import OdysseyCore
 
 @MainActor
@@ -10,6 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let threeD = ThreeDSession()
   private var threeDStatus = "3D is off"
   private var shortcut = KeyboardShortcut.load()
+  private var stereoInput = StereoInputSettings.load()
+  private lazy var stereoOptions = StereoInputSettingsWindowController(
+    current: { [weak self] in self?.stereoInput ?? StereoInputSettings() },
+    apply: { [weak self] value in self?.applyStereoInput(value) })
   private var hotKey: HotKey?
   private var nextHotKeyID: UInt32 = 10
   private var escapeKey: HotKey?
@@ -27,14 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var factoryStatus = "Connect the Odyssey video and USB cables."
   private lazy var settings = SettingsWindowController(
     currentShortcut: { [weak self] in self?.shortcut ?? .standard },
-    applyShortcut: { [weak self] value in try self?.changeShortcut(to: value) })
+    applyShortcut: { [weak self] value in try self?.changeShortcut(to: value) },
+    showStereoInput: { [weak self] in self?.showStereoOptions() })
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    if let raw = UserDefaults.standard.object(forKey: "videoLayout") as? Int,
-      let layout = SBSLayout(rawValue: raw)
-    {
-      threeD.layout = layout
-    }
+    threeD.stereoSettings = stereoInput
+    threeD.layout = stereoInput.format == .fullSBS ? .fullWidth : .halfWidth
     if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
       let icon = NSImage(contentsOf: iconURL)
     {
@@ -84,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       NSWorkspace.shared.notificationCenter.addObserver(
         self, selector: #selector(displayChanged), name: name, object: nil)
     }
+    if CommandLine.arguments.contains("--stereo-options") { showStereoOptions() }
     if CommandLine.arguments.contains("--settings") { showSettings() }
     if CommandLine.arguments.contains("--about") { showAbout() }
   }
@@ -159,11 +163,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       "An experimental depth effect that puts the background behind the front window. Escape exits."
     menu.addItem(desktop)
     menu.addItem(.separator())
+    let inputMenu = NSMenu()
+    inputMenu.autoenablesItems = false
+    for format in StereoInputFormat.allCases {
+      let option = item(format.title, #selector(selectStereoInput(_:)))
+      option.tag = format.rawValue
+      option.state = stereoInput.format == format ? .on : .off
+      inputMenu.addItem(option)
+    }
+    inputMenu.addItem(.separator())
+    let swap = item("Swap Left and Right Eyes", #selector(swapStereoEyes))
+    swap.state = stereoInput.swapEyes ? .on : .off
+    inputMenu.addItem(swap)
+    inputMenu.addItem(item("Input Options…", #selector(showStereoOptions)))
+    let input = NSMenuItem(
+      title: "Stereo Input: " + stereoInput.format.title, action: nil, keyEquivalent: "")
+    input.submenu = inputMenu
+    menu.addItem(input)
     for layout in [SBSLayout.halfWidth, .fullWidth] {
       let option = item(layout.title, #selector(selectLayout(_:)))
       option.tag = layout.rawValue
-      option.state = threeD.layout == layout ? .on : .off
-      option.isEnabled = !(running && threeD.mode != .video)
+      option.state = stereoInput.format.isSBS && threeD.layout == layout ? .on : .off
+      option.isEnabled = stereoInput.format.isSBS && !running && !changing
       option.toolTip =
         layout == .halfWidth
         ? "Stretch each complete eye view to fill the screen."
@@ -182,9 +203,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   @objc private func selectLayout(_ sender: NSMenuItem) {
     guard let layout = SBSLayout(rawValue: sender.tag) else { return }
-    threeD.layout = layout
-    UserDefaults.standard.set(layout.rawValue, forKey: "videoLayout")
+    var value = stereoInput
+    value.format = layout == .fullWidth ? .fullSBS : .halfSBS
+    applyStereoInput(value)
+  }
+
+  private func applyStereoInput(_ value: StereoInputSettings) {
+    if running || changing {
+      presentAfterStopping { [weak self] in self?.applyStereoInput(value) }
+      return
+    }
+    stereoInput = value.validated
+    stereoInput.save()
+    threeD.stereoSettings = stereoInput
+    threeD.layout = stereoInput.format == .fullSBS ? .fullWidth : .halfWidth
+    if stereoInput.format.isSBS {
+      UserDefaults.standard.set(threeD.layout.rawValue, forKey: "videoLayout")
+    }
     rebuildMenu()
+  }
+
+  @objc private func selectStereoInput(_ sender: NSMenuItem) {
+    guard let format = StereoInputFormat(rawValue: sender.tag) else { return }
+    var value = stereoInput
+    value.format = format
+    applyStereoInput(value)
+  }
+
+  @objc private func swapStereoEyes() {
+    var value = stereoInput
+    value.swapEyes.toggle()
+    applyStereoInput(value)
+  }
+
+  @objc private func showStereoOptions() {
+    presentAfterStopping { [weak self] in self?.stereoOptions.present() }
   }
 
   private func changeShortcut(to value: KeyboardShortcut) throws {
@@ -346,7 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let alert = NSAlert()
       alert.messageText = "macdissey 3d"
       alert.informativeText =
-        "Watch fullscreen side-by-side videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay an SBS video fullscreen, choose its picture layout, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nConvert ordinary fullscreen 2D video with Control–Shift–2 (Experimental). During conversion, Control–Shift–3/4 adjusts Depth and Control–Shift–5/6 adjusts Pop-Out.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
+        "Watch fullscreen stereo videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay a stereo video fullscreen, choose its Stereo Input format, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nConvert ordinary fullscreen 2D video with Control–Shift–2 (Experimental). During conversion, Control–Shift–3/4 adjusts Depth and Control–Shift–5/6 adjusts Pop-Out.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
       alert.icon = NSApp.applicationIconImage
       alert.addButton(withTitle: "OK")
       alerts.present(alert)

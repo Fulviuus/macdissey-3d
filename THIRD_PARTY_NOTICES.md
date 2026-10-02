@@ -3,6 +3,20 @@
 The project’s MIT license covers its original source code. It does not replace
 the licenses of the components below or license recovered vendor assets.
 
+## SR-Loom stereo input conversion
+
+`Resources/SRLoom/Converter.hlsl` is from
+[effcol/SR-Loom](https://github.com/effcol/SR-Loom/tree/d0b93f308d5aaf7c57fd02f5a3bd61402fe31f8b),
+commit `d0b93f308d5aaf7c57fd02f5a3bd61402fe31f8b`, copyright (c) 2026
+SR Loom contributors, MIT license. `Resources/StereoShaders` contains Metal
+translations produced by glslang and SPIRV-Cross. The native host adapts its
+layout conversion and anaglyph recovery pipeline. This open-source shader code
+is distinct from the recovered Samsung/Leia vendor assets.
+
+The full upstream license and attribution, including its frame-packing
+3DToElse/NTM-3D acknowledgement, are in `Resources/Licenses/SR-Loom-LICENSE.txt`
+and bundled in the application. See `Resources/SRLoom/README.md` for regeneration.
+
 ## ONNX Runtime 1.30.0 and detector ordering
 
 Face inference and monocular video-depth inference use ONNX Runtime 1.30.0,

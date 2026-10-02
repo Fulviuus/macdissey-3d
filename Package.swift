@@ -52,6 +52,9 @@ let package = Package(
     .target(name: "OdysseyConversion", dependencies: ["OdysseyInference"]),
     .target(name: "OdysseyMonitor"),
     .executableTarget(
+      name: "StereoInputChecks", dependencies: ["OdysseyConversion"],
+      path: "Tests/StereoInputChecks", exclude: ["README.md"]),
+    .executableTarget(
       name: "ConversionChecks", dependencies: ["OdysseyConversion"], path: "Tests/ConversionChecks"),
     .executableTarget(
       name: "OdysseyMenu",

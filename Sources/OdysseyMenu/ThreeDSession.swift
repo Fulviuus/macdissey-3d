@@ -9,6 +9,9 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
   weak var renderer: GLSBSRenderer?
   var colors: DisplayColorPipeline?
   var converter: VideoConverter?
+  var stereoInput: StereoInputConverter?
+  private(set) var decodedFrames = 0
+  private let srgb = DisplayColorPipeline(outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
   private var reportedColorSpace = false
   var failure: ((Error) -> Void)?
   func stream(
@@ -33,6 +36,21 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
         fflush(stdout)
         reportedColorSpace = true
       }
+      if let stereoInput {
+        let linear =
+          stereoInput.settings.format == .anaglyph
+          || (stereoInput.settings.format == .pulfrich && stereoInput.settings.pulfrichND)
+        let input = try (linear ? srgb : colors).convert(pixel, from: sourceSpace)
+        if let output = try stereoInput.process(
+          input, timestamp: sample.presentationTimeStamp.seconds)
+        {
+          decodedFrames += 1
+          renderer?.submit(
+            try colors.convert(
+              output, from: linear ? srgb.outputColorSpace : colors.outputColorSpace))
+        }
+        return
+      }
       let converted = try colors.convert(pixel, from: sourceSpace)
       if let converter { converter.submit(converted) } else { renderer?.submit(converted) }
     } catch { failure?(error) }
@@ -55,9 +73,19 @@ enum PresentationMode { case video, desktop, conversion }
   var status: ((String) -> Void)?
   var allowsLensActivation = true
   var mode: PresentationMode = .video
+  var stereoSettings = StereoInputSettings()
+  private var usesStereoDecoder: Bool {
+    mode == .video && (!stereoSettings.format.isSBS || stereoSettings.swapEyes)
+  }
   var renderedFrames: Int { renderer?.renderedFrames ?? 0 }
   var convertedFrames: Int { converter?.convertedFrames ?? 0 }
-  var layout = SBSLayout.fullWidth { didSet { if mode == .video { renderer?.layout = layout } } }
+  var decodedFrames: Int {
+    let currentSink = sink
+    return captureQueue.sync { currentSink?.decodedFrames ?? 0 }
+  }
+  var layout = SBSLayout.fullWidth {
+    didSet { if mode == .video && !usesStereoDecoder { renderer?.layout = layout } }
+  }
   private var weaving = false
   private var outputDisplayState: OutputDisplayState?
   private var outputColorSpace: CGColorSpace?
@@ -120,7 +148,7 @@ enum PresentationMode { case video, desktop, conversion }
         let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
       else { throw WeaverRenderFailure.unavailable }
       self.renderer = renderer
-      renderer.layout = mode == .video ? layout : .halfWidth
+      renderer.layout = mode == .video && !usesStereoDecoder ? layout : .halfWidth
       if mode == .conversion {
         let assets = resources.appendingPathComponent("Conversion")
         let reportFailure: (Error) -> Void = { [weak self] error in
@@ -189,6 +217,13 @@ enum PresentationMode { case video, desktop, conversion }
         sink.renderer = renderer
         sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
         sink.converter = converter
+        if usesStereoDecoder {
+          let settings = stereoSettings
+          sink.stereoInput = try await Task.detached {
+            try StereoInputConverter(
+              settings: settings, shaders: resources.appendingPathComponent("StereoShaders"))
+          }.value
+        }
         sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
         self.sink = sink
         let config = SCStreamConfiguration()

@@ -2,7 +2,7 @@
 
 <img src="Resources/Artwork/AppIcon.png" alt="macdissey 3d app icon" width="128" height="128">
 
-A macOS menu bar app for watching side-by-side (SBS) 3D video on the Samsung
+A macOS menu bar app for watching stereo 3D video on the Samsung
 Odyssey 3D G90XF. It captures the display, tracks the viewer with the monitor's
 stereo camera, and renders the two views using the monitor's factory calibration.
 
@@ -49,7 +49,8 @@ with **+**, enable it, then quit and reopen it.
 
 ## Watching a video
 
-1. Open an SBS video in a player and make it fullscreen on the Odyssey.
+1. Choose the video’s format under **Stereo Input** in the menu, then open it
+   fullscreen in a player on the Odyssey. SBS is selected by default.
 2. Choose **Activate 3D** in the menu bar, or press **Control–Option–Command–3**.
 3. Look toward the monitor's camera. Press **Escape**, press the activation
    shortcut again, or open the macdissey menu to stop 3D.
@@ -58,12 +59,55 @@ Use **Stretch to fill** for videos whose two eye views are horizontally squeezed
 Use **Remove black bars** for full-width SBS video displayed with top and bottom
 bars. This crops the bars before filling the screen.
 
+### Stereo input formats
+
+Available in v0.6.0 and later.
+
+The **Stereo Input** menu decodes the capture layouts in
+[SR-Loom](https://github.com/effcol/SR-Loom), using its MIT-licensed converter
+translated to Metal. **Input Options…** is also available from Settings.
+**Swap Left and Right Eyes** reverses the pair when the source uses the opposite order.
+These settings do not affect Desktop 3D or 2D conversion.
+
+| Input | Options and behaviour |
+| --- | --- |
+| Side-by-Side (Full / Half) | Full removes the central image’s top/bottom bars; Half stretches both complete halves. These correspond to the existing Remove black bars / Stretch to fill switches. |
+| Top-and-Bottom (Full / Half) | Left eye above, right eye below; stretches each half. Both use the same split, as in SR-Loom. |
+| Row Interleaved / Column Interleaved | Even source rows/columns feed the left eye, odd ones the right. |
+| Checkerboard | Top-left parity feeds the left eye; missing samples use directional interpolation. |
+| Anaglyph | Six colour pairs; Shared Colour, Filtered Colour, Half Colour, Monochrome, and Recovered Colour. Recovery uses SR-Loom’s multiscale disparity matching and colour borrowing. |
+| Frame Sequential (Experimental) | Alternates assignment of current/previous captured frames; Swap selects the initial eye phase. |
+| Pulfrich Effect | Delays one eye by 1–8 captured frames, or applies a neutral-density filter with adjustable transmission. Motion-dependent; not AI depth conversion. |
+| Frame Packing (HDMI 1.4) | Decodes two 1080-line views plus a 45-line gap, scaled to the capture; adjustable bottom-eye alignment. |
+| Quilt | Configurable grid and left/right view indices. Views run left to right, bottom to top, starting at 0; preserves tile aspect ratio. |
+| VR180 / VR360, SBS or Top-and-Bottom | Equirectangular stereo projection with yaw, pitch and zoom. Direction is selected in Input Options. |
+
+Use a fullscreen picture without player controls or added borders. Row/column
+interleaved and checkerboard sources must preserve their pixel grid in the **4K
+capture**: player scaling, macOS scaling, or an odd-pixel offset can destroy eye
+separation. Frame packing here describes the captured image, not an HDMI 3D
+signal emitted by macOS. Full SBS retains the existing central-50% vertical crop;
+choose Half / Stretch to fill when the picture already fills the display.
+
+ScreenCaptureKit can drop source frames and suppress unchanged frames. Therefore
+frame-sequential input cannot guarantee eye parity; reactivate to reset history
+and swap eyes if depth is reversed. Pulfrich delay is measured in accepted capture
+frames, not the source video’s frame rate. Neither mode repairs capture losses.
+
+Anaglyph recovery is approximate and more expensive than layout splitting. Lost
+colour cannot always be recovered. The port includes the core recovery pipeline;
+SR-Loom’s automatic page/tint-region analysis is not included. VR direction is
+manual, not a head-orientation viewer. Katanga’s Windows shared-texture receiver
+and raw Lytro light-field file import are separate source systems, not supported
+screen layouts; they are not included. SR-Loom’s window and Looking Glass
+presentation modes are also outside this feature.
+
 **VLC on macOS:** enable **Use the native fullscreen mode** in VLC's
 **Preferences → Interface**, save, and restart VLC before entering fullscreen.
 With VLC 3.0.23, this resolved horizontal misalignment and spillover between the
 eye views observed with its legacy fullscreen mode.
 
-**Settings** contains **Launch at login**, the SBS shortcut editor, and a reference
+**Settings** contains **Launch at login**, the stereo video shortcut editor, and a reference
 for every keyboard shortcut, including conversion controls and how to exit.
 The monochrome menu bar icon adapts to the system appearance.
 
@@ -77,7 +121,7 @@ Shortcuts work from other apps, including fullscreen players. In Settings,
 
 | Action | Shortcut | Available in |
 | --- | --- | --- |
-| Start SBS video / stop the active 3D mode | Control–Option–Command–3 (customizable in Settings) | Any app |
+| Start stereo video / stop the active 3D mode | Control–Option–Command–3 (customizable in Settings) | Any app |
 | Start 2D conversion / stop the active 3D mode | Control–Shift–2 | Any app |
 | Show Depth and Pop-Out values | Control–Shift–1 | Active 2D conversion |
 | Decrease 3D Depth | Control–Shift–3 | Active 2D conversion |
@@ -87,7 +131,7 @@ Shortcuts work from other apps, including fullscreen players. In Settings,
 | Stop any 3D mode | Escape | Any active 3D mode |
 
 Conversion shortcuts are fixed. Desktop 3D, picture layout, and Quit are available
-from the menu. Opening the macdissey menu also stops 3D. While editing the SBS
+from the menu. Opening the macdissey menu also stops 3D. While editing the stereo video
 shortcut in Settings, Escape cancels recording the new shortcut.
 
 ## 2D video conversion — experimental
@@ -134,7 +178,7 @@ depends on the Mac and what is on screen. Rounded corners, translucent windows,
 and an automatically hidden Dock can have imperfect depth boundaries. Menus,
 Spaces, focus transitions, and text readability still need broader testing.
 There is no perspective change as you move your head. The usual shortcut starts
-SBS video mode; desktop mode is activated separately from the menu.
+stereo video mode; desktop mode is activated separately from the menu.
 
 ## Building
 
@@ -207,7 +251,10 @@ sh scripts/check.sh
 The compact suite checks fragmented controller replies, malformed calibration,
 display color conversion, desktop layer composition, CPU/GPU upload equivalence,
 shortcut persistence/conflicts, window layout, alert dismissal, and display changes.
-It also checks conversion control ranges. Set `MACDISSEY_CONVERSION_ASSETS` to
+It also checks stereo layout separation on the GPU, anaglyph modes, frame-packing
+blanking, temporal pairing/reset, eye swapping, settings persistence, and conversion
+control ranges. These synthetic checks do not establish optical quality for every
+format on real video. Set `MACDISSEY_CONVERSION_ASSETS` to
 the private `Conversion` directory to additionally exercise model inference,
 stereo synthesis, paused-frame adjustment, and shutdown with synthetic input.
 It needs macOS with a logged-in graphical session, but does not enable the lenses
@@ -225,6 +272,8 @@ camera, and screen-capture permission, briefly switches to 4K, and restores the
 display afterward. It keeps the lenses off and does not establish optical quality.
 Use `--desktop-smoke-test` instead for desktop mode; add `--extended-check` to run
 either integration check for 60 seconds.
+For stereo decoding, add `--stereo-format N` to `--integration-smoke-test`, where
+`N` is the zero-based case in `StereoInputFormat` (for example, 3 for Half TAB).
 Use `--conversion-smoke-test` for 2D conversion when its private assets are present.
 
 ## Source layout
@@ -236,7 +285,7 @@ Use `--conversion-smoke-test` for 2D conversion when its private assets are pres
 | `Sources/OdysseyCamera` | Stereo camera acquisition and tracking pipeline |
 | `Sources/OdysseyVision` | Native OpenCV pose and image processing |
 | `Sources/OdysseyInference` | Native LiteRT and ONNX Runtime adapters |
-| `Sources/OdysseyConversion` | Experimental monocular depth and stereo synthesis |
+| `Sources/OdysseyConversion` | Metal stereo input decoding and experimental monocular depth synthesis |
 | `Sources/OdysseyGL` | OpenGL interface for the original weaver shaders |
 | `Sources/OdysseyRendering` | Display color conversion and desktop composition |
 | `Sources/OdysseyMonitor` | Optional monitor notification bridge client |
