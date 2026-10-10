@@ -37,6 +37,27 @@ import OdysseyConversion
       apply!.performClick(nil)
       precondition(applied?.format == format, "Settings apply lost selected format")
     }
+    for aspect in FullSBSAspect.allCases {
+      settings.format = .fullSBS
+      controller.present()
+      var aspectPicker: NSPopUpButton?
+      var apply: NSButton?
+      func inspect(_ view: NSView) {
+        if let popup = view as? NSPopUpButton,
+          popup.itemTitles == FullSBSAspect.allCases.map(\.title)
+        {
+          aspectPicker = popup
+        }
+        if let button = view as? NSButton, button.title == "Apply" { apply = button }
+        for child in view.subviews { inspect(child) }
+      }
+      inspect(controller.window!.contentView!)
+      precondition(aspectPicker?.titleOfSelectedItem == settings.effectiveFullSBSAspect.title)
+      aspectPicker!.selectItem(withTitle: aspect.title)
+      apply!.performClick(nil)
+      precondition(applied?.effectiveFullSBSAspect == aspect, "Full SBS aspect was not applied")
+      settings = applied!
+    }
     settings.format = .quilt
     controller.present()
     let content = controller.window!.contentView!

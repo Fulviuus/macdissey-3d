@@ -36,15 +36,15 @@ final class GLSBSRenderer: NSOpenGLView {
       24, UInt32(NSOpenGLPFAAlphaSize), 8, 0,
     ]
     guard let format = NSOpenGLPixelFormat(attributes: attributes) else {
-      throw WeaverRenderFailure.unavailable
+      throw WeaverRenderFailure.pixelFormat
     }
     super.init(frame: CGRect(origin: .zero, size: size), pixelFormat: format)
     wantsBestResolutionOpenGLSurface = true
-    guard let context = openGLContext else { throw WeaverRenderFailure.unavailable }
+    guard let context = openGLContext else { throw WeaverRenderFailure.context }
     context.makeCurrentContext()
     var interval: GLint = 1
     context.setValues(&interval, for: .swapInterval)
-    guard let resources = Bundle.main.resourceURL else { throw WeaverRenderFailure.unavailable }
+    guard let resources = Bundle.main.resourceURL else { throw WeaverRenderFailure.resources }
     let vertex = try String(contentsOf: resources.appendingPathComponent("Weaver/vertex.glsl"))
     let fragment = try String(contentsOf: resources.appendingPathComponent("Weaver/fragment.glsl"))
     let a = try FactoryCorrectionMap(
@@ -127,7 +127,7 @@ final class GLSBSRenderer: NSOpenGLView {
         cpuUploads += 1
       }
       guard status == 0 else {
-        failure?(WeaverRenderFailure.unavailable)
+        failure?(WeaverRenderFailure.sourceUpload(status))
         return
       }
       uploadedVersion = version
@@ -151,8 +151,9 @@ final class GLSBSRenderer: NSOpenGLView {
           vertices += [Float](repeating: 0, count: 12)
         }
       }
-      guard odyssey_gl_draw(renderer, vertices, fresh ? 1 : 0) == 0 else {
-        throw WeaverRenderFailure.unavailable
+      let status = odyssey_gl_draw(renderer, vertices, fresh ? 1 : 0)
+      guard status == 0 else {
+        throw WeaverRenderFailure.draw(status)
       }
       context.flushBuffer()
       glFinish()
@@ -171,4 +172,25 @@ final class GLSBSRenderer: NSOpenGLView {
     return abs(p.x) <= halfWidth
   }
 }
-enum WeaverRenderFailure: Error { case unavailable }
+enum WeaverRenderFailure: LocalizedError {
+  case pixelFormat, context, resources, view
+  case sourceUpload(Int32)
+  case draw(Int32)
+
+  var errorDescription: String? {
+    switch self {
+    case .pixelFormat:
+      return "macOS could not create the OpenGL 4.1 pixel format required for 3D output."
+    case .context:
+      return "macOS could not create the OpenGL drawing context for 3D output."
+    case .resources:
+      return "The app's 3D renderer resources are unavailable. Reinstall macdissey 3d."
+    case .view:
+      return "macOS could not create the 3D output view."
+    case .sourceUpload(let status):
+      return "The 3D renderer could not upload the captured image (status \(status))."
+    case .draw(let status):
+      return "The 3D renderer could not draw the output image (status \(status))."
+    }
+  }
+}

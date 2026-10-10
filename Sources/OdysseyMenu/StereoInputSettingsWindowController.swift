@@ -125,8 +125,15 @@ final class StereoInputSettingsWindowController: NSWindowController {
     stack.addArrangedSubview(swap)
     switch value.format {
     case .fullSBS:
+      let aspect = NSPopUpButton()
+      aspect.addItems(withTitles: FullSBSAspect.allCases.map(\.title))
+      aspect.selectItem(withTitle: value.effectiveFullSBSAspect.title)
+      row("Picture shape (each eye)", aspect)
+      readers.append { [weak self] in
+        self?.value.fullSBSAspect = FullSBSAspect.allCases[aspect.indexOfSelectedItem]
+      }
       help(
-        "Full-width SBS shown with top and bottom bars. Removes the central image's bars before filling the monitor. Use Half for squeezed views or a picture that already fills the display."
+        "For a fullscreen, unsqueezed SBS pair. Choose 4:3 for classic games such as ares N64: keeps the whole picture with side bars. Choose 16:9 for widescreen video. Use Half for squeezed views."
       )
     case .halfSBS:
       help("Stretches each complete left/right half to fill the monitor. No bars are removed.")

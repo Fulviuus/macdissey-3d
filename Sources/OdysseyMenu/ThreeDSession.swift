@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.graphics
 import OdysseyCamera
 import OdysseyConversion
 import OdysseyCore
@@ -64,7 +65,7 @@ enum PresentationMode { case video, desktop, conversion }
   private var stream: SCStream?, sink: ThreeDCaptureSink?, window: NSWindow?,
     renderer: GLSBSRenderer?
   private var camera: StereoCamera?, lens: LensOutput?
-  private var savedMode: CGDisplayMode?, displayID: CGDirectDisplayID = 0
+  private var savedMode: SavedDisplayMode?, displayID: CGDirectDisplayID = 0
   private var watchdog: OutputWatchdogClient?
   private var desktopCapture: DesktopCapture?
   private var converter: VideoConverter?
@@ -75,7 +76,7 @@ enum PresentationMode { case video, desktop, conversion }
   var mode: PresentationMode = .video
   var stereoSettings = StereoInputSettings()
   private var usesStereoDecoder: Bool {
-    mode == .video && (!stereoSettings.format.isSBS || stereoSettings.swapEyes)
+    mode == .video && stereoSettings.requiresDecoder
   }
   var renderedFrames: Int { renderer?.renderedFrames ?? 0 }
   var convertedFrames: Int { converter?.convertedFrames ?? 0 }
@@ -115,18 +116,26 @@ enum PresentationMode { case video, desktop, conversion }
         landmarkModelURL: resources.appendingPathComponent("Models/landmarks.tflite"))
     }.value
     try Task.checkCancellation()
-    let id = Hardware.displayID(screen)
+    var id = Hardware.displayID(screen)
     guard let original = CGDisplayCopyDisplayMode(id),
       let modes = CGDisplayCopyAllDisplayModes(
         id, [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary) as? [CGDisplayMode],
       let native = modes.filter({ $0.pixelWidth == 3840 && $0.pixelHeight == 2160 }).sorted(by: {
         let first = abs($0.width - original.width)
         let second = abs($1.width - original.width)
-        return first == second ? $0.refreshRate > $1.refreshRate : first < second
+        if first != second { return first < second }
+        if $0.refreshRate != $1.refreshRate { return $0.refreshRate > $1.refreshRate }
+        // Prefer the display's default timing over a duplicate native mode.
+        return ($0.ioFlags & UInt32(kDisplayModeDefaultFlag))
+          > ($1.ioFlags & UInt32(kDisplayModeDefaultFlag))
       }).first
     else {
       throw AppError.unavailable("No native 3840 × 2160 output mode is available on this display.")
     }
+    guard let saved = SavedDisplayMode(display: id, mode: original) else {
+      throw AppError.unavailable("Cannot identify the Odyssey display for safe mode restoration.")
+    }
+    let requested = DisplayModeDescription(native)
     print(
       "3D display mode: \(native.pixelWidth)×\(native.pixelHeight) at \(native.refreshRate) Hz (mode \(native.ioDisplayModeID))"
     )
@@ -136,17 +145,22 @@ enum PresentationMode { case video, desktop, conversion }
       self.lens = lens
       try await lens.start(port: port)
       displayID = id
-      savedMode = original
-      if original.ioDisplayModeID != native.ioDisplayModeID {
-        guard CGDisplaySetDisplayMode(id, native, nil) == .success else {
+      savedMode = saved
+      // Arm recovery before changing the display, including during startup.
+      let watchdog = OutputWatchdogClient()
+      try watchdog.start(port: port, savedMode: saved)
+      self.watchdog = watchdog
+      if saved.mode.id != requested.id {
+        guard DisplayModeConfiguration.apply(native, to: id) == .success else {
           throw AppError.unavailable("Cannot switch Odyssey to native 4K output.")
         }
-        try await Task.sleep(nanoseconds: 300_000_000)
       }
+      let activeScreen = try await DisplayModeConfiguration.waitUntilReady(saved, mode: requested)
+      id = Hardware.displayID(activeScreen)
+      displayID = id
       try Task.checkCancellation()
-      guard let activeScreen = NSScreen.screens.first(where: { Hardware.displayID($0) == id }),
-        let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
-      else { throw WeaverRenderFailure.unavailable }
+      guard let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
+      else { throw WeaverRenderFailure.view }
       self.renderer = renderer
       renderer.layout = mode == .video && !usesStereoDecoder ? layout : .halfWidth
       if mode == .conversion {
@@ -250,9 +264,6 @@ enum PresentationMode { case video, desktop, conversion }
       camera.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
       try await Task.detached { try camera.start() }.value
       try Task.checkCancellation()
-      let watchdog = OutputWatchdogClient()
-      try watchdog.start(port: port, display: id, mode: original)
-      self.watchdog = watchdog
       renderer.begin()
       status?("Waiting for eyes in the viewing area")
     } catch {
@@ -279,8 +290,9 @@ enum PresentationMode { case video, desktop, conversion }
     if let camera { await Task.detached { camera.stop() }.value }
     camera = nil
     renderer = nil
-    if let savedMode, CGDisplayIsOnline(displayID) != 0 {
-      _ = CGDisplaySetDisplayMode(displayID, savedMode, nil)
+    if let savedMode {
+      let restored = await DisplayModeConfiguration.restoreWhenAvailable(savedMode)
+      print("Display mode restoration: \(restored ? "confirmed" : "unavailable")")
     }
     savedMode = nil
     outputDisplayState = nil

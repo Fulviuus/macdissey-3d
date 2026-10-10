@@ -12,6 +12,10 @@ swiftc -parse-as-library Sources/OdysseyMenu/KeyboardShortcut.swift \
 swiftc -parse-as-library Sources/OdysseyMenu/OutputDisplayState.swift \
     Tests/OutputDisplayStateChecks/main.swift -o .build/settings-checks/OutputDisplayStateChecks
 .build/settings-checks/OutputDisplayStateChecks
+swiftc -parse-as-library Sources/OdysseyMenu/OutputDisplayState.swift \
+    Sources/OdysseyMenu/DisplayModeConfiguration.swift Tests/DisplayModeChecks/main.swift \
+    -o .build/settings-checks/DisplayModeChecks
+.build/settings-checks/DisplayModeChecks
 swiftc -parse-as-library Sources/OdysseyMenu/AlertPresenter.swift \
     Tests/AlertLifecycleChecks/main.swift -o .build/settings-checks/AlertLifecycleChecks
 python3 - <<'PY'

@@ -34,7 +34,7 @@ public final class StereoInputConverter {
       self.settings.format == .anaglyph
       || (self.settings.format == .pulfrich && self.settings.pulfrichND)
     _ = try gpu.stage(
-      recovery ? "PSMain" : self.settings.format.shader,
+      recovery ? "PSMain" : self.settings.shader,
       formats: [linear ? .bgra8Unorm_srgb : .bgra8Unorm])
     if recovery {
       for name in ["PSDown", "PSAnaDisp", "PSAnaRefine", "PSAnaFill", "PSAnaSmooth"] {
@@ -74,7 +74,7 @@ public final class StereoInputConverter {
     switch settings.format {
     case .fullSBS:
       ew = w / 2
-      eh = h / 2
+      eh = settings.effectiveFullSBSAspect == .standard ? max(1, ew * 9 / 16) : h / 2
     case .halfSBS, .columnInterleaved: ew = w / 2
     case .fullTAB, .halfTAB, .rowInterleaved: eh = h / 2
     case .framePacking: eh = max(1, Int((Double(h) * 1080 / 2205).rounded()))
@@ -169,6 +169,7 @@ public final class StereoInputConverter {
     var values: [String: [Double]] = [
       "g_format": [Double(settings.format.code)], "g_swap": [settings.swapEyes ? 1 : 0],
       "g_srcW": [w], "g_srcH": [h],
+      "g_eyeAspect": [settings.effectiveFullSBSAspect.ratio], "g_displayAspect": [16.0 / 9],
       "g_anaCombo": [Double(settings.anaglyphPair)], "g_anaMode": [Double(settings.anaglyphMode)],
       "g_pulfMode": [settings.pulfrichND ? 1 : 0], "g_pulfEye": [Double(settings.affectedEye)],
       "g_ndTrans": [settings.transmission],
@@ -202,7 +203,7 @@ public final class StereoInputConverter {
         values["g_swap"] = [(settings.swapEyes != !sequentialRight) ? 1 : 0]
       }
     }
-    var shader = settings.format.shader
+    var shader = settings.shader
     if !recovery.isEmpty {
       values["g_temporal"] = [recoveryValid ? 1 : 0]
       values["g_lvlToSrcX"] = [Double(recovery["src16"]!.width * 16) / w]

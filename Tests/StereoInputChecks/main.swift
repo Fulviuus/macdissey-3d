@@ -56,6 +56,72 @@ func eyes(_ p: CVPixelBuffer, _ left: [Int], _ right: [Int], _ tolerance: Int = 
       .appendingPathComponent("Resources/StereoShaders")
     let red: (UInt8, UInt8, UInt8) = (255, 0, 0)
     let blue: (UInt8, UInt8, UInt8) = (0, 0, 255)
+    // Native-size isolation catches cross-eye sampling at the packing seam,
+    // including pixels missed by the centre-colour checks below.
+    for litEye in 0...1 {
+      var settings = StereoInputSettings()
+      settings.format = .fullTAB
+      let input = makePixel(3840, 2160) { x, y in
+        let lit = y / 1080 == litEye
+        let white = x % 47 < 3 || y % 53 < 3
+        return lit && white ? (255, 255, 255) : (0, 0, 0)
+      }
+      let decoder = try StereoInputConverter(settings: settings, shaders: shaders)
+      let output = try decoder.process(input, timestamp: 1)!
+      CVPixelBufferLockBaseAddress(output, .readOnly)
+      let bytes = CVPixelBufferGetBaseAddress(output)!.assumingMemoryBound(to: UInt8.self)
+      let stride = CVPixelBufferGetBytesPerRow(output)
+      let pane = CVPixelBufferGetWidth(output) / 2
+      let start = litEye == 0 ? pane : 0
+      var maximum = UInt8(0)
+      for y in 0..<CVPixelBufferGetHeight(output) {
+        for x in start..<start + pane {
+          let i = y * stride + x * 4
+          maximum = max(maximum, bytes[i], bytes[i + 1], bytes[i + 2])
+        }
+      }
+      CVPixelBufferUnlockBaseAddress(output, .readOnly)
+      require(maximum == 0, "TAB leaked into black eye: maximum channel \(maximum)")
+    }
+    print("PASS native 4K TAB isolation: both black eye panes remain exactly zero")
+    // ares Full SBS: a pair of 192x144 (4:3) eyes, letterboxed on a 384x216
+    // display. Edge markers catch the old 50%-height crop; squares catch stretch.
+    let classic = makePixel(384, 216) { x, y in
+      guard (36..<180).contains(y) else { return (0, 0, 0) }
+      if y < 48 { return (0, 255, 0) }
+      if y >= 168 { return (255, 255, 0) }
+      if (72..<120).contains(x % 192) && (84..<132).contains(y) { return (255, 255, 255) }
+      return x < 192 ? red : blue
+    }
+    for swap in [false, true] {
+      var s = StereoInputSettings()
+      s.fullSBSAspect = .standard
+      s.swapEyes = swap
+      require(s.requiresDecoder, "4:3 SBS must bypass the legacy crop")
+      let output = try StereoInputConverter(settings: s, shaders: shaders).process(
+        classic, timestamp: 1)!
+      require(
+        CVPixelBufferGetWidth(output) == 384 && CVPixelBufferGetHeight(output) == 108,
+        "4:3 normalization dimensions")
+      for eye in 0...1 {
+        let start = eye * 192
+        let expected = (eye == 0) != swap ? [255, 0, 0] : [0, 0, 255]
+        for x in [0, 23, 168, 191] {
+          require(rgb(output, start + x, 54) == [0, 0, 0], "Asymmetric eye bars")
+        }
+        for x in [24, 48, 143, 167] {
+          require(rgb(output, start + x, 54) == expected, "Eye mix or misplaced picture")
+        }
+        require(rgb(output, start + 96, 3) == [0, 255, 0], "Top of 4:3 picture cropped")
+        require(rgb(output, start + 96, 104) == [255, 255, 0], "Bottom of 4:3 picture cropped")
+        let white = [255, 255, 255]
+        let horizontal = (0..<192).filter { rgb(output, start + $0, 54) == white }
+        let vertical = (0..<108).filter { rgb(output, start + 96, $0) == white }
+        require(horizontal == Array(78..<114), "4:3 square width or horizontal centre changed")
+        require(vertical == Array(36..<72), "4:3 square stretched or vertically displaced")
+      }
+    }
+    print("PASS 4:3 Full SBS: complete frame, square geometry, centred eyes and swap")
     for f in StereoInputFormat.allCases {
       var settings = StereoInputSettings()
       settings.format = f
@@ -166,6 +232,22 @@ func eyes(_ p: CVPixelBuffer, _ left: [Int], _ right: [Int], _ tolerance: Int = 
     s.swapEyes = true
     s.save(to: defaults)
     require(StereoInputSettings.load(from: defaults) == s, "Stereo settings persistence")
+    // Older saved JSON has no aspect field: keep all previous options and the
+    // original widescreen fast path. The new option survives a save/reload.
+    var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as! [String: Any]
+    legacy.removeValue(forKey: "fullSBSAspect")
+    defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: "stereoInput")
+    require(StereoInputSettings.load(from: defaults) == s, "Existing stereo settings reset")
+    require(
+      StereoInputSettings.load(from: defaults).effectiveFullSBSAspect == .widescreen,
+      "Existing Full SBS aspect changed")
+    s = StereoInputSettings()
+    require(!s.requiresDecoder, "Default SBS fast path changed")
+    s.fullSBSAspect = .standard
+    s.save(to: defaults)
+    require(StereoInputSettings.load(from: defaults) == s, "4:3 aspect persistence")
+    s.format = .halfSBS
+    require(!s.requiresDecoder, "4:3 option must not affect Half SBS")
     if CommandLine.arguments.contains("--benchmark") {
       let source = makePixel(3840, 2160) { x, y in
         (UInt8((x / 8) % 256), UInt8((y / 8) % 256), UInt8(((x + y) / 16) % 256))

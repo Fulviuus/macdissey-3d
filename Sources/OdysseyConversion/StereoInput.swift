@@ -60,9 +60,28 @@ public enum StereoInputFormat: Int, CaseIterable, Codable, Sendable {
   }
 }
 
+/// Aspect of one unsqueezed eye in an aspect-fit fullscreen SBS source.
+public enum FullSBSAspect: String, CaseIterable, Codable, Sendable {
+  case widescreen, standard
+  public var title: String {
+    self == .widescreen ? "16:9 (Widescreen)" : "4:3 (Classic Games)"
+  }
+  var ratio: Double { self == .widescreen ? 16.0 / 9 : 4.0 / 3 }
+}
+
 public struct StereoInputSettings: Codable, Equatable, Sendable {
   public var format: StereoInputFormat = .fullSBS
   public var swapEyes = false
+  // Optional so existing saved settings decode without losing any other options.
+  public var fullSBSAspect: FullSBSAspect?
+  public var effectiveFullSBSAspect: FullSBSAspect { fullSBSAspect ?? .widescreen }
+  public var requiresDecoder: Bool {
+    !format.isSBS || swapEyes || (format == .fullSBS && effectiveFullSBSAspect == .standard)
+  }
+  var shader: String {
+    format == .fullSBS && effectiveFullSBSAspect == .standard
+      ? "PSFullSBSAspectFit" : format.shader
+  }
   public var anaglyphPair = 0, anaglyphMode = 4
   public var pulfrichND = false, affectedEye = 1, delayFrames = 1
   public var transmission = 0.3

@@ -20,6 +20,10 @@ full equivalence with the Windows software have not been established.
 The desktop can use another resolution or scaling setting. During 3D playback,
 the app selects a native 4K pixel mode and restores the previous mode on exit.
 Arbitrary scaled output is not supported for the final optical rendering.
+On macOS 27, the monitor can briefly reconnect during the switch. The app waits
+for stable native-pixel output before starting 3D; a separate recovery process
+restores the previous mode if the app stops unexpectedly. Permanent display
+preferences are unchanged.
 
 ## Install the app
 
@@ -59,6 +63,13 @@ Use **Stretch to fill** for videos whose two eye views are horizontally squeezed
 Use **Remove black bars** for full-width SBS video displayed with top and bottom
 bars. This crops the bars before filling the screen.
 
+For **ares N64** with **Side by Side** and **Full SBS Width** enabled, select
+**Side-by-Side (Full)**, then **Input Options… → Picture shape (each eye) →
+4:3 (Classic Games)**. Use fullscreen with the standard aspect ratio and hide
+ares's status bar (**Settings → Show Status Bar**) so the pair stays centred. This keeps
+the whole game picture at its original shape, with side bars in each eye, rather
+than applying the widescreen crop. Switch back to **16:9 (Widescreen)** for videos.
+
 ### Stereo input formats
 
 Available in v0.6.0 and later.
@@ -71,7 +82,7 @@ These settings do not affect Desktop 3D or 2D conversion.
 
 | Input | Options and behaviour |
 | --- | --- |
-| Side-by-Side (Full / Half) | Full removes the central image’s top/bottom bars; Half stretches both complete halves. These correspond to the existing Remove black bars / Stretch to fill switches. |
+| Side-by-Side (Full / Half) | Full removes the fullscreen pair’s top/bottom bars. Input Options selects 16:9 eyes or 4:3 eyes with preserved shape and side bars. Half stretches both complete halves. These correspond to the Remove black bars / Stretch to fill switches. |
 | Top-and-Bottom (Full / Half) | Left eye above, right eye below; stretches each half. Both use the same split, as in SR-Loom. |
 | Row Interleaved / Column Interleaved | Even source rows/columns feed the left eye, odd ones the right. |
 | Checkerboard | Top-left parity feeds the left eye; missing samples use directional interpolation. |
@@ -86,7 +97,7 @@ Use a fullscreen picture without player controls or added borders. Row/column
 interleaved and checkerboard sources must preserve their pixel grid in the **4K
 capture**: player scaling, macOS scaling, or an odd-pixel offset can destroy eye
 separation. Frame packing here describes the captured image, not an HDMI 3D
-signal emitted by macOS. Full SBS retains the existing central-50% vertical crop;
+signal emitted by macOS. Full SBS defaults to the existing 16:9 central-50% vertical crop;
 choose Half / Stretch to fill when the picture already fills the display.
 
 ScreenCaptureKit can drop source frames and suppress unchanged frames. Therefore
@@ -274,7 +285,65 @@ Use `--desktop-smoke-test` instead for desktop mode; add `--extended-check` to r
 either integration check for 60 seconds.
 For stereo decoding, add `--stereo-format N` to `--integration-smoke-test`, where
 `N` is the zero-based case in `StereoInputFormat` (for example, 3 for Half TAB).
+Add `--stereo-format 0 --sbs-aspect 4:3` to check the Full SBS classic-game path.
 Use `--conversion-smoke-test` for 2D conversion when its private assets are present.
+
+## Separate spinning-cube test app
+
+**Stereo Cube** generates controlled source images for all 16 stereo formats,
+plus ordinary 2D for the AI conversion mode. Download the standalone
+[Stereo Cube 1.0.0 app](https://github.com/Fulviuus/macdissey-3d/releases/download/v0.6.0/Stereo-Cube-v1.0.0-macos-arm64.zip)
+for Apple silicon and macOS 14 or later. It is ad-hoc signed and not notarized;
+the same **Open Anyway** instructions above apply. A matching source archive
+and checksums are attached to the release.
+
+To build it yourself:
+
+```sh
+sh scripts/build-cube-app.sh
+open "dist/Stereo Cube.app"
+```
+
+This is an independent app with its own identifier. It requires only the Xcode
+Command Line Tools and system Metal frameworks; no private assets, camera access
+or screen-capture permissions. It does not replace or configure macdissey.
+
+Choose the same format in both apps, click **Show Fullscreen** on the Odyssey,
+then activate macdissey with your normal 3D shortcut. The raw source is supposed
+to look packed or distorted before decoding. For Full SBS, use **16:9
+(Widescreen)** if macdissey offers a per-eye picture shape. Match the anaglyph colour pair;
+for Quilt use 5 columns × 9 rows and views 20/24; for VR start at yaw/pitch 0 and
+zoom 1. For the ordinary 2D source, activate **Convert 2D Video to 3D** instead.
+
+Controls include pause, stereo separation (zero is a no-disparity reference),
+grayscale, L/R markers and left-only/right-only output. Use **SBS with eye
+isolation** to investigate optical leakage; anaglyph reconstruction can introduce
+its own signal. **Space** pauses the focused preview, **F** toggles fullscreen,
+**⌘,** opens Controls, and **⌘Q** quits. **Esc** first stops active macdissey 3D;
+press it again to leave the source’s fullscreen view before changing formats.
+
+**G** toggles the diagnostic **Grid at screen depth** reference while the preview
+is focused. It gives the grid zero disparity while keeping the cube stereoscopic,
+with the same grid spacing and brightness. This is a comparison for investigating
+ghosting, not a correction to the monitor’s calibration.
+
+Interleaved/checkerboard tests are valid only at native 3840 × 2160 fullscreen
+pixels, after macdissey switches the display mode. The control window reports the
+source drawable size. Windowed or scaled previews do not validate pixel parity.
+Frame Sequential intentionally alternates eyes, even when rotation is paused,
+but screen capture can lose parity. Pulfrich uses a moving mono source and may
+lose its depth effect when paused. Desktop 3D is a separate compositor effect;
+it can be tried with the cube’s ordinary preview window.
+
+Run the generator’s independent packing checks without enabling 3D:
+
+```sh
+"dist/Stereo Cube.app/Contents/MacOS/StereoCube" --self-test
+```
+
+These checks cover left/right disparity, packing, checkerboard parity, anaglyph
+channel assignment, black-eye isolation, zero separation and the frame-packing
+gap. They validate source generation, not the optical result of every mode.
 
 ## Source layout
 

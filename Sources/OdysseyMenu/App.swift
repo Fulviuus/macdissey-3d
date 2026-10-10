@@ -4,6 +4,10 @@ import OdysseyConversion
 @main
 enum MacdisseyMain {
   @MainActor static func main() {
+    // Opt out before the first ONNX environment is created. Its optional
+    // telemetry uploader can race process teardown on macOS 27; the C API's
+    // later DisableTelemetryEvents call does not prevent uploader creation.
+    setenv("ORT_DISABLE_TELEMETRY", "1", 1)
     if OutputWatchdog.runIfRequested() { return }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
@@ -42,6 +46,13 @@ enum MacdisseyMain {
             session.stereoSettings.format = format
             session.layout = format == .fullSBS ? .fullWidth : .halfWidth
           }
+          if let index = CommandLine.arguments.firstIndex(of: "--sbs-aspect") {
+            guard CommandLine.arguments.indices.contains(index + 1),
+              ["4:3", "16:9"].contains(CommandLine.arguments[index + 1])
+            else { throw AppError.unavailable("--sbs-aspect requires 4:3 or 16:9") }
+            session.stereoSettings.fullSBSAspect =
+              CommandLine.arguments[index + 1] == "4:3" ? .standard : .widescreen
+          }
           guard let screen = NSScreen.screens.first(where: Hardware.isOdyssey),
             let port = Hardware.devices().first(where: { $0.vendorID == 0x354b })?.serialPort
           else {
@@ -65,7 +76,7 @@ enum MacdisseyMain {
           await session.stop()
           if let failure { throw failure }
           guard frames > 0 else { throw AppError.unavailable("No frames rendered") }
-          if session.mode == .video && !session.stereoSettings.format.isSBS {
+          if session.mode == .video && session.stereoSettings.requiresDecoder {
             guard decoded > 0 else { throw AppError.unavailable("No stereo frames decoded") }
             print("Decoded \(decoded) captured frames as \(session.stereoSettings.format.title).")
           }
