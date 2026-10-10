@@ -57,6 +57,9 @@ let package = Package(
     .executableTarget(
       name: "ConversionChecks", dependencies: ["OdysseyConversion"], path: "Tests/ConversionChecks"),
     .executableTarget(
+      name: "DepthModelChecks", dependencies: ["OdysseyConversion"],
+      path: "Tests/DepthModelChecks"),
+    .executableTarget(
       name: "OdysseyMenu",
       dependencies: [
         "OdysseyCore", "OdysseyCamera", "OdysseyGL", "OdysseyRendering", "OdysseyMonitor",

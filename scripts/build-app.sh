@@ -12,6 +12,7 @@ python3 scripts/build-vision.py
 python3 scripts/prepare-inference.py
 python3 scripts/prepare-face-inference.py
 python3 scripts/prepare-archive.py
+python3 scripts/prepare-video-depth.py
 sh scripts/build-icon.sh
 swift build -c release --product OdysseyMenu -Xswiftc -file-prefix-map -Xswiftc "$PWD=."
 bundle="${1:-$PWD/dist/macdissey 3d.app}"
@@ -28,6 +29,13 @@ if [ -s "$assets/Conversion/model.onnx" ]; then
     mkdir -p "$bundle/Contents/Resources/Conversion"
     cp -R "$assets/Conversion/." "$bundle/Contents/Resources/Conversion/"
 fi
+if [ -d "$bundle/Contents/Resources/DepthNetworks" ]; then
+    rm -r "$bundle/Contents/Resources/DepthNetworks"
+fi
+if [ -d "$bundle/Contents/Resources/VideoDepthSmall" ]; then
+    rm -r "$bundle/Contents/Resources/VideoDepthSmall"
+fi
+cp -R .build/video-depth-small "$bundle/Contents/Resources/VideoDepthSmall"
 cp -R Resources/StereoShaders "$bundle/Contents/Resources/"
 cp -f .build/release/OdysseyMenu "$bundle/Contents/MacOS/OdysseyMenu"
 cp -f .tools/sevenzip-native/7zz "$bundle/Contents/MacOS/7zz"

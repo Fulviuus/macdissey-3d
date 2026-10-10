@@ -234,13 +234,9 @@ final class ConversionGPU {
         withBytes: $0.baseAddress!, bytesPerRow: pitch)
     }
   }
-  func uniform(_ arg: MTLArgument, _ values: [String: [Double]]) throws -> MTLBuffer {
+  func uniform(_ arg: MTLArgument, _ values: [String: [Double]]) throws -> [UInt32] {
     guard let type = arg.bufferStructType else { throw GPUFailure("No struct for \(arg.name)") }
-    guard
-      let bytes = device.makeBuffer(
-        length: max(16, arg.bufferDataSize), options: .storageModeShared)
-    else { throw GPUFailure("Cannot allocate conversion uniforms.") }
-    memset(bytes.contents(), 0, bytes.length)
+    var bytes = [UInt32](repeating: 0, count: (max(16, arg.bufferDataSize) + 3) / 4)
     for member in type.members {
       guard let list = values[member.name] else { continue }  // GLSL uniforms start at zero.
       var count: Int
@@ -264,12 +260,14 @@ final class ConversionGPU {
         integer = true
       default: throw GPUFailure("Unhandled uniform type \(member.name) \(member.dataType)")
       }
-      guard list.count == count, member.offset + count * 4 <= bytes.length else {
+      guard list.count == count, member.offset % 4 == 0,
+        member.offset + count * 4 <= bytes.count * 4
+      else {
         throw GPUFailure("Uniform size \(member.name)")
       }
       for i in 0..<count {
         let bits: UInt32 = integer ? UInt32(bitPattern: Int32(list[i])) : Float(list[i]).bitPattern
-        bytes.contents().storeBytes(of: bits, toByteOffset: member.offset + i * 4, as: UInt32.self)
+        bytes[member.offset / 4 + i] = bits
       }
     }
     return bytes
@@ -325,21 +323,41 @@ final class ConversionGPU {
     for arg in s.args where arg.isActive {
       switch arg.type {
       case .buffer:
-        let b: MTLBuffer
         if let supplied = buffers[arg.name] ?? buffers[s.types[arg.name] ?? ""] {
-          b = supplied
+          retained.append(supplied)
+          if compute {
+            ce!.setBuffer(supplied, offset: 0, index: arg.index)
+          } else {
+            re!.setFragmentBuffer(supplied, offset: 0, index: arg.index)
+          }
         } else if arg.access == .readOnly, let type = arg.bufferStructType,
           !type.members.contains(where: { $0.dataType == .array && !$0.name.contains("_pad") })
         {
-          b = try uniform(arg, values)
+          let bytes = try uniform(arg, values)
+          // Metal copies small constants into command-buffer storage, keeping
+          // each pass independent without allocating a shared GPU buffer.
+          try bytes.withUnsafeBytes { data in
+            if data.count <= 4096 {
+              if compute {
+                ce!.setBytes(data.baseAddress!, length: data.count, index: arg.index)
+              } else {
+                re!.setFragmentBytes(data.baseAddress!, length: data.count, index: arg.index)
+              }
+            } else {
+              guard
+                let buffer = device.makeBuffer(
+                  bytes: data.baseAddress!, length: data.count, options: .storageModeShared)
+              else { throw GPUFailure("Cannot allocate conversion uniforms.") }
+              retained.append(buffer)
+              if compute {
+                ce!.setBuffer(buffer, offset: 0, index: arg.index)
+              } else {
+                re!.setFragmentBuffer(buffer, offset: 0, index: arg.index)
+              }
+            }
+          }
         } else {
           throw GPUFailure("Missing buffer \(name):\(arg.name)")
-        }
-        retained.append(b)
-        if compute {
-          ce!.setBuffer(b, offset: 0, index: arg.index)
-        } else {
-          re!.setFragmentBuffer(b, offset: 0, index: arg.index)
         }
       case .texture:
         guard let t = textures[arg.name] else {

@@ -111,3 +111,31 @@ SHA256 `9cbde5099c6deb73691b0579063da5827522ccbbcba3f0020fd04e8c8c16c0d4`.
 The unmodified helper comes from Homebrew's `sevenzip` formula and can be
 replaced independently of the Swift application. The archive helper is used
 only for the three factory optical calibration files.
+
+## Bundled Video Depth Anything Small
+
+The application bundles Video Depth Anything Small as two compiled FP16 Core ML
+programs. Learned weights and generated programs are not stored in this source
+repository. `scripts/prepare-video-depth.py` pins and verifies the public checkpoint:
+
+- Source: https://huggingface.co/AEmotionStudio/Video-Depth-Anything-Small
+- Revision: `50aafe6478a8932fd1380df4847feb009962afad`
+- SHA-256: `85c583474dcafda4d417776431343afcdfdfc97952d8ec00029d3452c55a05a2`
+- Weight license: Apache 2.0, separate from the application's MIT license.
+
+The safetensors checkpoint is a conversion of the original Depth Anything model:
+https://huggingface.co/depth-anything/Video-Depth-Anything-Small.
+The architecture and streaming cache algorithm are adapted from
+https://github.com/DepthAnything/Video-Depth-Anything at commit
+`4f5ae23172ba60fd7bc11ef671cca678842c7072`, Copyright (2025) Bytedance Ltd. and/or
+its affiliates, Apache-2.0. Its motion modules derive from AnimateDiff
+(Apache-2.0). Modifications: fixed 518 × 294 inference, precomputed upstream
+position embeddings, FP16 Core ML operations and history tensors, native Swift
+streaming, and separately compiled first-frame/recurrent programs.
+
+The full license is in `Resources/Licenses/Video-Depth-Anything-LICENSE.txt`, copied
+into the application. The developer export uses coremltools 9.0 (BSD-3-Clause)
+and PyTorch 2.7.0 (BSD-style license); neither is distributed with the app.
+No recovered Samsung model or shader is stored in these source files.
+
+Apache 2.0: https://www.apache.org/licenses/LICENSE-2.0

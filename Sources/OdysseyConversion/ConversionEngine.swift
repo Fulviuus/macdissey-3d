@@ -22,12 +22,19 @@ public struct ConversionAdjustment: Equatable, Sendable {
 // weaving and eye tracking remain the responsibility of the existing renderer.
 final class ConversionEngine {
   let gpu: ConversionGPU
-  let model: OpaquePointer
+  let model: OpaquePointer?
+  let videoDepth: VideoDepthPredictor?
+  let depthResampler: DepthMapResampler?
+  let depthWorker: DepthInferenceWorker<CVPixelBuffer>?
+  let modelWidth: Int, modelHeight: Int
   let side: Int
   let width = 1920, height = 1080
   let depthGraph: ConversionDepthGraph
   let stereo: ConversionStereoGraph
-  let rgb: MTLTexture, normalized: MTLTexture, sliced: MTLTexture, modelDepth: MTLTexture,
+  var inferenceRGB: MTLTexture?
+  var rgb: MTLTexture
+  let normalized: MTLTexture, sliced: MTLTexture,
+    modelDepth: MTLTexture,
     depth: MTLTexture
   let importPipeline: MTLRenderPipelineState, exportPipeline: MTLRenderPipelineState
   var textureCache: CVMetalTextureCache
@@ -38,51 +45,89 @@ final class ConversionEngine {
   var hudAdjustment: ConversionAdjustment?
   private let profile = ProcessInfo.processInfo.environment["MACDISSEY_PROFILE_CONVERSION"] == "1"
 
-  init(assets: URL) throws {
-    gpu = try ConversionGPU(root: assets.appendingPathComponent("Shaders"))
-    var dimension: Int32 = 0
-    var status: Int32 = 0
-    let modelURL = assets.appendingPathComponent("model.onnx")
-    var accelerated: OpaquePointer?
-    if ProcessInfo.processInfo.environment["MACDISSEY_CONVERSION_CPU"] != "1" {
-      // Keep compiled models private and separate caches when weights or the
-      // runtime change. A read-only/unavailable cache falls back to CPU.
-      if let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-        let data = try? Data(contentsOf: modelURL, options: .mappedIfSafe)
-      {
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let cache = cacheRoot.appendingPathComponent("macdissey-3d/Conversion/ort-1.30.0/" + hash)
-        do {
-          try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-          accelerated = odyssey_monocular_create_accelerated(
-            modelURL.path, cache.path, &dimension, &status)
-        } catch {
-          // CPU remains available when the cache cannot be created.
-        }
+  init(assets: URL, depthModel: DepthModelConfiguration? = nil) throws {
+    var ready = false
+    var ownedModel: OpaquePointer?
+    var acquired: VideoDepthPredictor?
+    defer {
+      if !ready {
+        if let ownedModel { odyssey_monocular_destroy(ownedModel) }
+        acquired?.recycle()
       }
     }
-    guard let loaded = accelerated ?? odyssey_monocular_create(modelURL.path, &dimension, &status)
-    else {
-      throw GPUFailure("Cannot load the 2D conversion model (\(status)).")
+    gpu = try ConversionGPU(root: assets.appendingPathComponent("Shaders"))
+    if let depthModel, depthModel.model != .samsung {
+      let loaded = try VideoDepthPredictor.acquire(depthModel)
+      acquired = loaded
+      videoDepth = loaded
+      model = nil
+      modelWidth = VideoDepthPredictor.width
+      modelHeight = VideoDepthPredictor.height
+      // The recovered reduction pyramids and histogram dispatches use a
+      // power-of-two square. Resample the rectangular prediction into that
+      // domain, keeping inference at the configured rectangular dimensions.
+      side = 512
+      print("2D conversion model: " + depthModel.model.title)
+    } else {
+      var dimension: Int32 = 0
+      var status: Int32 = 0
+      let modelURL = assets.appendingPathComponent("model.onnx")
+      var accelerated: OpaquePointer?
+      if ProcessInfo.processInfo.environment["MACDISSEY_CONVERSION_CPU"] != "1" {
+        // Keep compiled models private and separate caches when weights or the
+        // runtime change. A read-only/unavailable cache falls back to CPU.
+        if let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+          .first,
+          let data = try? Data(contentsOf: modelURL, options: .mappedIfSafe)
+        {
+          let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+          let cache = cacheRoot.appendingPathComponent("macdissey-3d/Conversion/ort-1.30.0/" + hash)
+          do {
+            try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+            accelerated = odyssey_monocular_create_accelerated(
+              modelURL.path, cache.path, &dimension, &status)
+          } catch {
+            // CPU remains available when the cache cannot be created.
+          }
+        }
+      }
+      guard let loaded = accelerated ?? odyssey_monocular_create(modelURL.path, &dimension, &status)
+      else {
+        throw GPUFailure("Cannot load the 2D conversion model (\(status)).")
+      }
+      print("2D conversion inference: " + (accelerated == nil ? "CPU" : "Core ML GPU"))
+      model = loaded
+      ownedModel = loaded
+      side = Int(dimension)
+      modelWidth = side
+      modelHeight = side
+      videoDepth = nil
+      // If later initialization fails, the partially initialized object does not
+      // receive deinit. Release the native session in that case.
     }
-    print("2D conversion inference: " + (accelerated == nil ? "CPU" : "Core ML GPU"))
-    model = loaded
-    side = Int(dimension)
-    // If later initialization fails, the partially initialized object does not
-    // receive deinit. Release the native session in that case.
-    var ready = false
-    defer { if !ready { odyssey_monocular_destroy(loaded) } }
+    depthResampler = videoDepth == nil ? nil : try DepthMapResampler(gpu: gpu)
+    if let videoDepth,
+      ProcessInfo.processInfo.environment["MACDISSEY_DEPTH_SYNCHRONOUS"] != "1"
+    {
+      depthWorker = DepthInferenceWorker<CVPixelBuffer>(
+        outputCount: modelWidth * modelHeight, changedScene: { videoDepth.changedScene },
+        predict: { try videoDepth.predict($0, output: &$1) })
+    } else {
+      depthWorker = nil
+    }
     depthGraph = try ConversionDepthGraph(
       gpu: gpu, side: side, width: width, height: height, root: assets)
     stereo = try ConversionStereoGraph(
       gpu: gpu, width: width, height: height, samples: depthGraph.buffers["SAM"]!)
     rgb = try gpu.texture(width, height, format: .rgba16Float, mips: true)
-    normalized = try gpu.texture(side, side)
-    sliced = try gpu.texture(side, side * 3, format: .r32Float)
-    modelDepth = try gpu.texture(side, side, format: .r32Float)
+    inferenceRGB =
+      depthWorker == nil ? nil : try gpu.texture(width, height, format: .rgba16Float, mips: true)
+    normalized = try gpu.texture(modelWidth, modelHeight)
+    sliced = try gpu.texture(modelWidth, modelHeight * 3, format: .r32Float)
+    modelDepth = try gpu.texture(modelWidth, modelHeight, format: .r32Float)
     depth = try gpu.texture(side, side, format: .r32Float)
-    input = [Float](repeating: 0, count: side * side * 3)
-    output = [Float](repeating: 0, count: side * side)
+    input = [Float](repeating: 0, count: modelWidth * modelHeight * 3)
+    output = [Float](repeating: 0, count: modelWidth * modelHeight)
     var cache: CVMetalTextureCache?
     guard CVMetalTextureCacheCreate(nil, nil, gpu.device, nil, &cache) == kCVReturnSuccess,
       let cache
@@ -119,7 +164,7 @@ final class ConversionEngine {
     exportPipeline = try pipeline("exportStereo", .bgra8Unorm)
     ready = true
   }
-  deinit { odyssey_monocular_destroy(model) }
+  deinit { if let model { odyssey_monocular_destroy(model) } }
 
   func cvTexture(_ pixel: CVPixelBuffer) throws -> (CVMetalTexture, MTLTexture) {
     guard CVPixelBufferGetPixelFormatType(pixel) == kCVPixelFormatType_32BGRA else {
@@ -170,42 +215,91 @@ final class ConversionEngine {
             + checkpoints.map { "\($0.0)=\(String(format: "%.2f", $0.1))" }.joined(separator: " "))
       }
     }
-    if let pixel {
+    var importedFrame: CVMetalTexture?
+    defer { withExtendedLifetime(importedFrame) {} }
+    func importFrame(_ pixel: CVPixelBuffer, into target: MTLTexture) throws {
       let (cv, texture) = try cvTexture(pixel)
-      try bridge(importPipeline, inputs: [texture], output: rgb)
-      defer { withExtendedLifetime(cv) {} }
-      try gpu.mipmaps(rgb)
+      importedFrame = cv
+      try bridge(importPipeline, inputs: [texture], output: target)
+      try gpu.mipmaps(target)
+    }
+    let completedDepth = try depthWorker?.takeLatest()
+    var updatedDepth = false
+    var changedScene = false
+    if completedDepth != nil, let preparedRGB = inferenceRGB {
+      // This texture contains the exact frame which produced the completed map.
+      // Swap before preparing another capture, retaining its pixels and mipmaps
+      // instead of importing the same full-HD frame twice.
+      inferenceRGB = rgb
+      rgb = preparedRGB
+    }
+    if let pixel, depthWorker?.canSubmit ?? true {
+      let sourceRGB = inferenceRGB ?? rgb
+      try importFrame(pixel, into: sourceRGB)
       try gpu.run(
-        "mde/psNormalizeArea", textures: ["SRC": rgb],
+        "mde/psNormalizeArea", textures: ["SRC": sourceRGB],
         values: [
           "mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225],
-          "resolution": [Double(side), Double(side)],
+          "resolution": [Double(modelWidth), Double(modelHeight)],
         ], outputs: [normalized])
       try gpu.run("mde/psSlice", textures: ["SRC": normalized], outputs: [sliced])
       try gpu.flush()
       input.withUnsafeMutableBytes {
         sliced.getBytes(
-          $0.baseAddress!, bytesPerRow: side * 4, from: MTLRegionMake2D(0, 0, side, side * 3),
+          $0.baseAddress!, bytesPerRow: modelWidth * 4,
+          from: MTLRegionMake2D(0, 0, modelWidth, modelHeight * 3),
           mipmapLevel: 0)
       }
       mark("preprocess")
-      let code = input.withUnsafeBufferPointer { src in
-        output.withUnsafeMutableBufferPointer { dst in
-          odyssey_monocular_invoke(model, src.baseAddress, src.count, dst.baseAddress, dst.count)
+      if let depthWorker {
+        depthWorker.submit(input, frame: pixel)
+      } else if let videoDepth {
+        try videoDepth.predict(input, output: &output)
+        changedScene = videoDepth.changedScene
+        updatedDepth = true
+      } else {
+        let code = input.withUnsafeBufferPointer { src in
+          output.withUnsafeMutableBufferPointer { dst in
+            odyssey_monocular_invoke(model, src.baseAddress, src.count, dst.baseAddress, dst.count)
+          }
         }
+        guard code == 0 else { throw GPUFailure("2D depth inference failed (\(code)).") }
+        updatedDepth = true
       }
       mark("inference")
-      guard code == 0 else { throw GPUFailure("2D depth inference failed (\(code)).") }
+    }
+    if let result = completedDepth {
+      // Postprocessing, focus and stereo synthesis all use the exact RGB frame
+      // which produced this map, even if capture has moved ahead.
+      output = result.depth
+      changedScene = result.changedScene
+      updatedDepth = true
+    }
+    if updatedDepth {
       output.withUnsafeBytes {
         modelDepth.replace(
-          region: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0, withBytes: $0.baseAddress!,
-          bytesPerRow: side * 4)
+          region: MTLRegionMake2D(0, 0, modelWidth, modelHeight), mipmapLevel: 0,
+          withBytes: $0.baseAddress!,
+          bytesPerRow: modelWidth * 4)
       }
-      try gpu.run("mde/psVflip", textures: ["SRC": modelDepth], outputs: [depth])
+      if let depthResampler {
+        try depthResampler.run(gpu: gpu, source: modelDepth, output: depth)
+      } else {
+        try gpu.run("mde/psVflip", textures: ["SRC": modelDepth], outputs: [depth])
+      }
+      if changedScene { try depthGraph.resetVideoHistory() }
       lastRGBZ = try depthGraph.process(rgb: rgb, depth: depth)
       mark("depth")
+    } else if pixel != nil {
+      // A new capture without its own depth must never replace the paired RGB.
+      // Controls can still redraw the last completed pair when pixel is nil.
+      try gpu.flush()
+      return nil
     }
-    guard let lastRGBZ else { return nil }
+    guard let lastRGBZ else {
+      try gpu.flush()
+      return nil
+    }
     stereo.depthScale = adjustment.scale
     stereo.popOut = adjustment.shift
     let (left, right) = try stereo.process(lastRGBZ, depth: depthGraph.textures["DET"]!)

@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private lazy var stereoOptions = StereoInputSettingsWindowController(
     current: { [weak self] in self?.stereoInput ?? StereoInputSettings() },
     apply: { [weak self] value in self?.applyStereoInput(value) })
+  private let depthLibrary = DepthModelLibrary.shared
+  private lazy var depthModels = DepthModelsWindowController(
+    library: depthLibrary,
+    performChange: { [weak self] action in self?.presentAfterStopping(action) })
   private var hotKey: HotKey?
   private var nextHotKeyID: UInt32 = 10
   private var escapeKey: HotKey?
@@ -33,9 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private lazy var settings = SettingsWindowController(
     currentShortcut: { [weak self] in self?.shortcut ?? .standard },
     applyShortcut: { [weak self] value in try self?.changeShortcut(to: value) },
-    showStereoInput: { [weak self] in self?.showStereoOptions() })
+    showStereoInput: { [weak self] in self?.showStereoOptions() },
+    showDepthModels: { [weak self] in self?.showDepthModels() })
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    depthLibrary.prepareSelectedModel()
     threeD.stereoSettings = stereoInput
     threeD.layout = stereoInput.format == .fullSBS ? .fullWidth : .halfWidth
     if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
@@ -88,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self, selector: #selector(displayChanged), name: name, object: nil)
     }
     if CommandLine.arguments.contains("--stereo-options") { showStereoOptions() }
+    if CommandLine.arguments.contains("--depth-models") { showDepthModels() }
     if CommandLine.arguments.contains("--settings") { showSettings() }
     if CommandLine.arguments.contains("--about") { showAbout() }
   }
@@ -275,6 +282,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       show("This build does not include the private 2D conversion assets.")
       return
     }
+    do { threeD.depthModel = try depthLibrary.configuration() } catch {
+      show(error.localizedDescription)
+      return
+    }
     activate3D(mode: .conversion)
   }
 
@@ -385,6 +396,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     } else {
       action()
     }
+  }
+
+  @objc private func showDepthModels() {
+    presentAfterStopping { [weak self] in self?.depthModels.present() }
   }
 
   @objc private func showSettings() {

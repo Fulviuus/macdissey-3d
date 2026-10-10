@@ -16,6 +16,9 @@ swiftc -parse-as-library Sources/OdysseyMenu/OutputDisplayState.swift \
     Sources/OdysseyMenu/DisplayModeConfiguration.swift Tests/DisplayModeChecks/main.swift \
     -o .build/settings-checks/DisplayModeChecks
 .build/settings-checks/DisplayModeChecks
+swiftc -parse-as-library Sources/OdysseyMenu/DisplayFrameClock.swift \
+    Tests/DisplayFrameChecks/main.swift -o .build/settings-checks/DisplayFrameChecks
+.build/settings-checks/DisplayFrameChecks
 swiftc -parse-as-library Sources/OdysseyMenu/AlertPresenter.swift \
     Tests/AlertLifecycleChecks/main.swift -o .build/settings-checks/AlertLifecycleChecks
 python3 - <<'PY'

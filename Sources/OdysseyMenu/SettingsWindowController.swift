@@ -16,18 +16,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private(set) var isRecording = false
   private let currentShortcut: () -> KeyboardShortcut
   private let showStereoInput: () -> Void
+  private let showDepthModels: () -> Void
   private let applyShortcut: (KeyboardShortcut) throws -> Void
 
   init(
     currentShortcut: @escaping () -> KeyboardShortcut,
     applyShortcut: @escaping (KeyboardShortcut) throws -> Void,
-    showStereoInput: @escaping () -> Void = {}
+    showStereoInput: @escaping () -> Void = {},
+    showDepthModels: @escaping () -> Void = {}
   ) {
     self.currentShortcut = currentShortcut
     self.applyShortcut = applyShortcut
     self.showStereoInput = showStereoInput
+    self.showDepthModels = showDepthModels
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 540, height: 690),
+      contentRect: NSRect(x: 0, y: 0, width: 540, height: 650),
       styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "macdissey 3d Settings"
     window.isReleasedWhenClosed = false
@@ -95,6 +98,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
       row.orientation = .horizontal
       return row
     }
+    let depthButton = NSButton(
+      title: "Depth Models…", target: self, action: #selector(openDepthModels))
+    depthButton.bezelStyle = .rounded
+    let conversionHeading = NSStackView(views: [conversionTitle, NSView(), depthButton])
+    conversionHeading.orientation = .horizontal
+    conversionHeading.alignment = .centerY
     let references = [
       referenceRow("Start conversion / stop 3D", "⌃⇧2"),
       referenceRow("Show Depth and Pop-Out values", "⌃⇧1"),
@@ -124,7 +133,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
       views: [
         title, loginRow, loginHelp, approvalButton,
         divider, shortcutLabel, shortcutRow, shortcutHelp, stereoButton,
-        conversionDivider, conversionTitle,
+        conversionDivider, conversionHeading,
       ] + references + [conversionHelp, exitDivider, exitRow, keyLegend, menuHelp])
     stack.orientation = .vertical
     stack.alignment = .leading
@@ -135,7 +144,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     for view in references + [exitRow] {
       view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
-    for view in [conversionHelp, menuHelp, conversionDivider, exitDivider] {
+    for view in [conversionHelp, menuHelp, conversionDivider, exitDivider, conversionHeading] {
       view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
     NSLayoutConstraint.activate([
@@ -151,13 +160,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     ])
   }
 
+  @objc private func openDepthModels() { showDepthModels() }
+
   @objc private func openStereoInput() { showStereoInput() }
 
   @objc private func refreshLogin() {
     let status = SMAppService.mainApp.status
     loginSwitch.state = status == .enabled || status == .requiresApproval ? .on : .off
     approvalButton.isHidden = status != .requiresApproval
-    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 730 : 690))
+    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 690 : 650))
     loginHelp.stringValue =
       status == .requiresApproval
       ? "Allow macdissey 3d in Login Items to finish enabling launch at login."

@@ -85,6 +85,13 @@ final class ConversionDepthGraph {
       grid: MTLSize(width: width, height: height, depth: 1),
       group: MTLSize(width: group, height: group == 32 ? 32 : 1, depth: 1))
   }
+  /// Recurrent VDA resets before predicting a new shot. Reset its focus and
+  /// image/depth filters on that same paired frame, preventing old-shot blending.
+  func resetVideoHistory() throws {
+    frame = 0
+    for name in ["SCB", "MFCSB", "STAEND", "REMAP", "SMAP"] { try gpu.clear(buffers[name]!) }
+    for name in ["RGB0", "IIR0", "IIR1"] { try gpu.clear(textures[name]!) }
+  }
   func process(rgb: MTLTexture, depth: MTLTexture) throws -> MTLTexture {
     defer { frame += 1 }
     try pass(
@@ -174,6 +181,10 @@ final class ConversionDepthGraph {
         "contour_threshold": [0.05], "foreground_thresh": [0.2], "background_thresh": [0.3],
         "dither_strength": [0.01],
       ])
+    return try merge(rgb: rgb)
+  }
+
+  func merge(rgb: MTLTexture) throws -> MTLTexture {
     try pass("psMergeRGBZ", "RGBZ", ["RGB": rgb, "SRC": textures["DET"]!])
     return textures["RGBZ"]!
   }

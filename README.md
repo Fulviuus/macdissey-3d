@@ -156,7 +156,7 @@ appearing briefly in the image. Depth changes the separation between the
 synthesized views; Pop-Out moves the depth range relative to the screen. These
 controls apply only to conversion, not to recorded SBS video or Desktop 3D.
 
-This port uses the recovered Samsung Player 1.5.0 fast depth model and conversion
+By default, this port uses the recovered Samsung Player 1.5.0 fast depth model and conversion
 stages, translated to Metal, with the recovered control formulas. It processes
 1920 × 1080 pixels per eye before native 4K weaving. It is an experimental native
 port: playback and smoothness have been verified on one setup, and numerical
@@ -171,6 +171,39 @@ the model; compiled models are cached locally for subsequent activations.
 
 Conversion is included in v0.5.0 and later. Building it from source requires the
 additional private assets described below.
+
+### Choose a depth model
+
+Open **Settings… → Depth Models…**. Samsung remains the default. Video Depth
+Anything Small is also included; click **Use Model** to select it. No downloads,
+Python, package manager or separate runtime installation are needed by app users.
+Changing models stops active 3D; start conversion again to use your selection.
+This setting affects 2D video conversion only.
+
+Small ships as two precompiled FP16 Core ML programs, about 110 MB together.
+The export fixes the input at 518 × 294 and precomputes the original position
+embedding without changing its values. GPU inference uses half-precision
+arithmetic and history buffers. Frame-history selection and retention follow the
+upstream streaming algorithm. Core ML can still specialize the model for a Mac
+on first use; the selected model prepares in the background and its loaded
+sessions stay resident for subsequent activations. Preparation finishes before
+changing the display mode or enabling lens output. Reactivating conversion
+clears video history. Abrupt shot changes reset both recurrent inference and the
+focus/depth filters before presenting the new shot. Gradual motion retains context.
+
+Video playback and Small depth inference run on separate workers. Each completed
+depth map is displayed with the exact video frame which produced it. Picture
+updates are limited by inference speed. The prepared RGB texture moves with its
+completed depth map without a second full-frame import. Conversion publishes
+straight into the renderer's latest-frame slot, avoiding a main-thread queue of
+retained output buffers. Stereo synthesis remains 1920 × 1080
+per eye. Output is experimental and has not been optically validated on hardware.
+Small's Apache 2.0 license and source attribution are included with the app;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Upgrading removes the old app-owned model downloads and ONNX acceleration caches,
+including Base. A retired selection returns to Samsung; an existing Small
+selection uses the bundled model.
 
 ## Desktop 3D — experimental
 
@@ -262,6 +295,11 @@ sh scripts/check.sh
 The compact suite checks fragmented controller replies, malformed calibration,
 display color conversion, desktop layer composition, CPU/GPU upload equivalence,
 shortcut persistence/conflicts, window layout, alert dismissal, and display changes.
+Display pacing checks cover main-thread callbacks, the 60 Hz rendering budget,
+shutdown and suspension while the output view is hidden. Presentation follows the
+output display's refresh through an AppKit display link. Conversion passes copy
+small shader constants directly into Metal commands; shader arithmetic, model
+precision and image resolution are unchanged.
 It also checks stereo layout separation on the GPU, anaglyph modes, frame-packing
 blanking, temporal pairing/reset, eye swapping, settings persistence, and conversion
 control ranges. These synthetic checks do not establish optical quality for every
@@ -271,6 +309,31 @@ stereo synthesis, paused-frame adjustment, and shutdown with synthetic input.
 It needs macOS with a logged-in graphical session, but does not enable the lenses
 or require private model assets. Checks are standalone executables because the
 Command Line Tools installation does not include XCTest.
+
+`DepthModelChecks` checks bundled model selection, retired-model migration and
+missing-file fallback. Set `MACDISSEY_DEPTH_CHECK_DIRECTORY` to
+`.build/video-depth-small` to additionally exercise 46 Core ML video frames,
+history eviction and reset. `check-depth-model-settings.sh` checks immediate
+selection and the compact native window in light/dark appearance, including its
+overflow scrollbar.
+
+`check-depth-inference-worker.sh` checks nonblocking depth delivery, bounded work,
+matched source frames, failure propagation, runtime reuse and shutdown. For a
+sustained 60 Hz input check, set
+`MACDISSEY_CONVERSION_STREAM_SECONDS=6` alongside the conversion fixture variables.
+Add `MACDISSEY_CONVERSION_TEXTURED_STREAM=1` for moving, textured input.
+The check reports changing video frames per second and frame gaps. The developer
+override `MACDISSEY_DEPTH_SYNCHRONOUS=1` enables the old synchronous path for comparison.
+
+`scripts/prepare-video-depth.py`, called by the release build, automatically
+acquires the SHA-256-pinned public Small checkpoint and upstream source, installs
+pinned export dependencies in `.tools/video-depth-venv`, then exports and compiles
+the two Core ML programs into `.build/video-depth-small`. Developers need
+**Python 3.12** in addition to the build tools above. This Python requirement
+applies only to building the app, not using it. Subsequent builds verify and reuse
+the compiled outputs. Learned weights and generated model assets stay outside
+version control. `scripts/export-video-depth-networks.py` contains the export and
+pins upstream commit `4f5ae23172ba60fd7bc11ef671cca678842c7072`.
 
 An optional hardware integration check is available in a built app:
 

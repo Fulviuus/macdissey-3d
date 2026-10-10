@@ -12,6 +12,7 @@ public final class VideoConverter: @unchecked Sendable {
   private var hudUntil = Date.distantPast
   private var refresh = false, working = false, stopped = false
   private var completed = 0
+  private var recycled = false
   private let deliver: (CVPixelBuffer) -> Void
   private let failure: (Error) -> Void
 
@@ -22,11 +23,13 @@ public final class VideoConverter: @unchecked Sendable {
   }
 
   public init(
-    assets: URL, deliver: @escaping (CVPixelBuffer) -> Void, failure: @escaping (Error) -> Void
+    assets: URL, depthModel: DepthModelConfiguration? = nil,
+    deliver: @escaping (CVPixelBuffer) -> Void, failure: @escaping (Error) -> Void
   ) throws {
-    engine = try ConversionEngine(assets: assets)
+    engine = try ConversionEngine(assets: assets, depthModel: depthModel)
     self.deliver = deliver
     self.failure = failure
+    engine.depthWorker?.didComplete = { [weak self] in self?.refreshDepth() }
   }
   public func submit(_ pixel: CVPixelBuffer) {
     lock.lock()
@@ -62,7 +65,24 @@ public final class VideoConverter: @unchecked Sendable {
   }
   public func stop() async {
     cancelPending()
-    await withCheckedContinuation { continuation in queue.async { continuation.resume() } }
+    await engine.depthWorker?.stop()
+    await withCheckedContinuation { continuation in
+      queue.async { [self] in
+        if !recycled {
+          engine.videoDepth?.recycle()
+          recycled = true
+        }
+        continuation.resume()
+      }
+    }
+  }
+  private func refreshDepth() {
+    lock.lock()
+    if !stopped {
+      refresh = true
+      scheduleLocked()
+    }
+    lock.unlock()
   }
   private func cancelPending() {
     lock.lock()
@@ -79,15 +99,16 @@ public final class VideoConverter: @unchecked Sendable {
   private func drain() {
     while true {
       lock.lock()
-      guard !stopped && (pending != nil || refresh) else {
+      let consumeInput = engine.depthWorker?.canAdvance ?? true
+      guard !stopped && ((consumeInput && pending != nil) || refresh) else {
         working = false
         lock.unlock()
         return
       }
-      let pixel = pending
+      let pixel = consumeInput ? pending : nil
       let value = adjustment
       let hud = Date() < hudUntil
-      pending = nil
+      if consumeInput { pending = nil }
       refresh = false
       lock.unlock()
       do {

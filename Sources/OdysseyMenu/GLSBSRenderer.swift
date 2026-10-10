@@ -4,6 +4,7 @@ import OdysseyCamera
 import OdysseyCore
 import OdysseyGL
 import OpenGL.GL3
+import QuartzCore
 
 enum SBSLayout: Int, CaseIterable {
   case fullWidth, halfWidth
@@ -21,7 +22,7 @@ final class GLSBSRenderer: NSOpenGLView {
   private var source: CVPixelBuffer?
   private var sourceVersion: UInt64 = 0, uploadedVersion: UInt64 = 0
   private var pose: StereoTrackingPose?
-  private var timer: Timer?
+  private var frameLink: CADisplayLink?
   private(set) var renderedFrames = 0
   private var gpuUploads = 0, cpuUploads = 0
   var layout: SBSLayout = .fullWidth { didSet { uploadedVersion = 0 } }
@@ -57,15 +58,12 @@ final class GLSBSRenderer: NSOpenGLView {
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
   func begin() {
-    let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-      MainActor.assumeIsolated { self?.needsDisplay = true }
-    }
-    self.timer = timer
-    RunLoop.main.add(timer, forMode: .common)
+    frameLink?.invalidate()
+    frameLink = DisplayFrameClock.start(for: self) { [weak self] in self?.needsDisplay = true }
   }
   func end() {
-    timer?.invalidate()
-    timer = nil
+    frameLink?.invalidate()
+    frameLink = nil
     print("Weaver uploads: \(gpuUploads) GPU surfaces, \(cpuUploads) CPU copies")
     openGLContext?.makeCurrentContext()
     if let renderer {

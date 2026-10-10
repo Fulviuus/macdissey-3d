@@ -69,11 +69,13 @@ enum PresentationMode { case video, desktop, conversion }
   private var watchdog: OutputWatchdogClient?
   private var desktopCapture: DesktopCapture?
   private var converter: VideoConverter?
+  private var conversionDelivery: ConversionFrameDelivery<CVPixelBuffer>?
   private let captureQueue = DispatchQueue(label: "Odyssey.3D-capture", qos: .userInteractive)
   var failure: ((Error) -> Void)?
   var status: ((String) -> Void)?
   var allowsLensActivation = true
   var mode: PresentationMode = .video
+  var depthModel: DepthModelConfiguration?
   var stereoSettings = StereoInputSettings()
   private var usesStereoDecoder: Bool {
     mode == .video && stereoSettings.requiresDecoder
@@ -141,6 +143,22 @@ enum PresentationMode { case video, desktop, conversion }
     )
     fflush(stdout)
     do {
+      if mode == .conversion {
+        let delivery = ConversionFrameDelivery<CVPixelBuffer>()
+        conversionDelivery = delivery
+        status?("Preparing \(depthModel?.model.title ?? "Samsung depth")…")
+        let assets = resources.appendingPathComponent("Conversion")
+        let reportFailure: (Error) -> Void = { [weak self] error in
+          Task { @MainActor in self?.failure?(error) }
+        }
+        let selectedDepthModel = depthModel
+        converter = try await Task.detached {
+          try VideoConverter(
+            assets: assets, depthModel: selectedDepthModel,
+            deliver: { delivery.submit($0) }, failure: reportFailure)
+        }.value
+        try Task.checkCancellation()
+      }
       let lens = LensOutput { [weak self] error in Task { @MainActor in self?.failure?(error) } }
       self.lens = lens
       try await lens.start(port: port)
@@ -162,21 +180,10 @@ enum PresentationMode { case video, desktop, conversion }
       guard let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
       else { throw WeaverRenderFailure.view }
       self.renderer = renderer
+      // submit only publishes under a lock; all OpenGL work remains on the
+      // main thread. Avoid scheduling a retaining task per converted frame.
+      conversionDelivery?.connect { [weak renderer] in renderer?.submit($0) }
       renderer.layout = mode == .video && !usesStereoDecoder ? layout : .halfWidth
-      if mode == .conversion {
-        let assets = resources.appendingPathComponent("Conversion")
-        let reportFailure: (Error) -> Void = { [weak self] error in
-          Task { @MainActor in self?.failure?(error) }
-        }
-        converter = try await Task.detached {
-          try VideoConverter(
-            assets: assets,
-            deliver: { [weak renderer] pixel in
-              Task { @MainActor in renderer?.submit(pixel) }
-            }, failure: reportFailure)
-        }.value
-        try Task.checkCancellation()
-      }
       renderer.failure = { [weak self] error in self?.failure?(error) }
       renderer.presented = { [weak self, weak lens] valid in
         guard let self else { return }
@@ -272,6 +279,8 @@ enum PresentationMode { case video, desktop, conversion }
     }
   }
   func stop() async {
+    conversionDelivery?.disconnect()
+    conversionDelivery = nil
     renderer?.presented = nil
     await lens?.stop()
     lens = nil
