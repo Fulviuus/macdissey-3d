@@ -181,7 +181,8 @@ import MetalKit
       let id =
         ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         ?? 0
-      return CGDisplayVendorNumber(id) == 0x4c2d && CGDisplayModelNumber(id) == 0x7860
+      return OdysseyDisplay.matches(
+        vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id))
     }) {
       screen.selectItem(at: index)
     } else if screens.indices.contains(old) {

@@ -3,10 +3,11 @@ set -eu
 cd "$(dirname "$0")/.."
 bundle="${1:-$PWD/dist/Stereo Cube.app}"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-# Reuse the input enum/settings only, with no camera, vendor model or runtime dependencies.
+# Reuse input settings and display matching, with no camera or model runtime dependencies.
 swiftc -O -parse-as-library -target arm64-apple-macos14.0 \
     -file-prefix-map "$PWD=." \
-    Sources/OdysseyConversion/StereoInput.swift Sources/StereoCube/*.swift \
+    Sources/OdysseyConversion/StereoInput.swift Sources/OdysseyMonitor/OdysseyDisplay.swift \
+    Sources/StereoCube/*.swift \
     -o "$bundle/Contents/MacOS/StereoCube"
 cp Resources/StereoCube/Cube.metal "$bundle/Contents/Resources/"
 cp LICENSE "$bundle/Contents/Resources/"
@@ -26,4 +27,6 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 PLIST
 codesign --force --sign - "$bundle"
 codesign --verify --deep --strict "$bundle"
+# Refresh Finder's modification date when rebuilding an existing bundle.
+touch "$bundle"
 printf '%s\n' "$bundle"

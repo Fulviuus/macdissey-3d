@@ -17,6 +17,9 @@ full equivalence with the Windows software have not been established.
 - A connection that exposes a native 3840 × 2160 display mode.
 - Camera and Screen Recording permissions for the app.
 
+Display detection accepts the G90XF model IDs `0x7860` and `0x7859` with
+Samsung's display vendor ID `0x4c2d`.
+
 The desktop can use another resolution or scaling setting. During 3D playback,
 the app selects a native 4K pixel mode and restores the previous mode on exit.
 Arbitrary scaled output is not supported for the final optical rendering.

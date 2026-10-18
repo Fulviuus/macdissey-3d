@@ -1,5 +1,6 @@
 import AppKit
 import IOKit
+import OdysseyMonitor
 
 struct USBDevice: Codable {
   let vendorID: Int
@@ -63,7 +64,8 @@ enum Hardware {
 
   static func isOdyssey(_ screen: NSScreen) -> Bool {
     let id = displayID(screen)
-    return CGDisplayVendorNumber(id) == 0x4c2d && CGDisplayModelNumber(id) == 0x7860
+    return OdysseyDisplay.matches(
+      vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id))
   }
 
 }

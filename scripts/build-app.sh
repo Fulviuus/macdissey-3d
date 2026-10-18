@@ -61,4 +61,6 @@ install_name_tool -delete_rpath "$PWD/.tools/onnx-native/lib" "$bundle/Contents/
 # Remove debug symbols before applying the final bundle signature.
 strip -S "$bundle/Contents/MacOS/OdysseyMenu"
 python3 scripts/sign-app.py "$bundle"
+# Finder displays the bundle directory's date, which replacing its files may not update.
+touch "$bundle"
 printf '%s\n' "$bundle"
