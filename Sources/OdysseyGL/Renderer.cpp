@@ -12,9 +12,11 @@ struct OdysseyGL {
   GLuint program = 0, vao = 0, buffers[2] = {0}, textures[4] = {0};
   int width = 0, height = 0;
   GLuint surfaceTexture = 0, copyFrames[2] = {0};
+  GLuint eyeSurfaceTextures[2] = {0};
   std::vector<uint8_t> upload;
   ~OdysseyGL() {
     glDeleteFramebuffers(2, copyFrames);
+    glDeleteTextures(2, eyeSurfaceTextures);
     if (surfaceTexture)
       glDeleteTextures(1, &surfaceTexture);
     glDeleteTextures(4, textures);
@@ -161,8 +163,9 @@ int odyssey_gl_source_surface(OdysseyGL *r, IOSurfaceRef surface, int top, int c
     return 1;
   if (!r->surfaceTexture) {
     glGenTextures(1, &r->surfaceTexture);
-    glGenFramebuffers(2, r->copyFrames);
   }
+  if (!r->copyFrames[0])
+    glGenFramebuffers(2, r->copyFrames);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_RECTANGLE, r->surfaceTexture);
   glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -209,6 +212,73 @@ int odyssey_gl_source_surface(OdysseyGL *r, IOSurfaceRef surface, int top, int c
     glEnable(GL_FRAMEBUFFER_SRGB);
   const auto error = glGetError();
   return complete && error == GL_NO_ERROR ? 0 : 2;
+}
+
+int odyssey_gl_source_eyes(OdysseyGL *r, IOSurfaceRef left, IOSurfaceRef right) {
+  if (!r || !left || !right)
+    return 1;
+  const size_t width = IOSurfaceGetWidth(left), height = IOSurfaceGetHeight(left);
+  if (width < 2 || width > 3840 || height < 1 || height > 2160)
+    return 1;
+  for (auto surface : {left, right}) {
+    if (IOSurfaceGetWidth(surface) != width || IOSurfaceGetHeight(surface) != height ||
+        IOSurfaceGetPlaneCount(surface) != 0 || IOSurfaceGetBytesPerElement(surface) != 4 ||
+        IOSurfaceGetPixelFormat(surface) != 0x42475241)
+      return 1;
+  }
+  if (!r->eyeSurfaceTextures[0])
+    glGenTextures(2, r->eyeSurfaceTextures);
+  if (!r->copyFrames[0])
+    glGenFramebuffers(2, r->copyFrames);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, r->textures[0]);
+  if (r->width != (int)width * 2 || r->height != (int)height) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)width * 2, (GLsizei)height, 0, GL_BGRA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    r->width = (int)width * 2;
+    r->height = (int)height;
+  }
+  GLint readFrame = 0, drawFrame = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFrame);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFrame);
+  const auto scissor = glIsEnabled(GL_SCISSOR_TEST), srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_FRAMEBUFFER_SRGB);
+  bool complete = true;
+  IOSurfaceRef surfaces[] = {left, right};
+  for (int eye = 0; eye < 2; eye++) {
+    glBindTexture(GL_TEXTURE_RECTANGLE, r->eyeSurfaceTextures[eye]);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    if (CGLTexImageIOSurface2D(CGLGetCurrentContext(), GL_TEXTURE_RECTANGLE, GL_RGBA8,
+                               (GLsizei)width, (GLsizei)height, GL_BGRA,
+                               GL_UNSIGNED_INT_8_8_8_8_REV, surfaces[eye], 0) != kCGLNoError) {
+      complete = false;
+      break;
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->copyFrames[0]);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE,
+                           r->eyeSurfaceTextures[eye], 0);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, r->copyFrames[1]);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, r->textures[0],
+                           0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+        glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+      complete = false;
+      break;
+    }
+    glBlitFramebuffer(0, (GLint)height, (GLint)width, 0, eye * (GLint)width, 0,
+                      (eye + 1) * (GLint)width, (GLint)height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  }
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, readFrame);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFrame);
+  if (scissor)
+    glEnable(GL_SCISSOR_TEST);
+  if (srgb)
+    glEnable(GL_FRAMEBUFFER_SRGB);
+  return complete && glGetError() == GL_NO_ERROR ? 0 : 2;
 }
 
 int odyssey_gl_draw(OdysseyGL *r, const float *vertices, int woven) {

@@ -1,10 +1,12 @@
 import AppKit
 import CoreVideo
+import MacdisseyClient
 import OdysseyCamera
 import OdysseyCore
 import OdysseyGL
 import OpenGL.GL3
 import QuartzCore
+import simd
 
 enum SBSLayout: Int, CaseIterable {
   case fullWidth, halfWidth
@@ -25,6 +27,9 @@ final class GLSBSRenderer: NSOpenGLView {
   private var frameLink: CADisplayLink?
   private(set) var renderedFrames = 0
   private var gpuUploads = 0, cpuUploads = 0
+  var directInput: DirectStereoInput?
+  var preferredFramesPerSecond: Double = 60
+  private var hasDirectFrame = false
   var layout: SBSLayout = .fullWidth { didSet { uploadedVersion = 0 } }
   var presented: ((Bool) -> Void)?
   var failure: ((Error) -> Void)?
@@ -59,9 +64,13 @@ final class GLSBSRenderer: NSOpenGLView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
   func begin() {
     frameLink?.invalidate()
-    frameLink = DisplayFrameClock.start(for: self) { [weak self] in self?.needsDisplay = true }
+    frameLink = DisplayFrameClock.start(for: self, framesPerSecond: preferredFramesPerSecond) {
+      [weak self] in self?.needsDisplay = true
+    }
   }
   func end() {
+    directInput?.close()
+    directInput = nil
     frameLink?.invalidate()
     frameLink = nil
     print("Weaver uploads: \(gpuUploads) GPU surfaces, \(cpuUploads) CPU copies")
@@ -97,7 +106,10 @@ final class GLSBSRenderer: NSOpenGLView {
     let version = sourceVersion
     let position = pose
     lock.unlock()
-    guard let buffer else { return }
+    let directFrame = directInput?.takeLatest()
+    var consumed = false
+    defer { directFrame?.complete(consumed: consumed) }
+    guard buffer != nil || directFrame != nil || hasDirectFrame else { return }
     context.makeCurrentContext()
     let backing = convertToBacking(bounds)
     guard Int(backing.width) == 3840, Int(backing.height) == 2160 else {
@@ -105,7 +117,17 @@ final class GLSBSRenderer: NSOpenGLView {
       failure?(AppError.unavailable("3D output must use exactly 3840 × 2160 physical pixels."))
       return
     }
-    if version != uploadedVersion {
+    if let directFrame {
+      let status = odyssey_gl_source_eyes(renderer, directFrame.left, directFrame.right)
+      guard status == 0 else {
+        // A failed import may already have queued a GPU read of the left eye.
+        glFinish()
+        failure?(WeaverRenderFailure.sourceUpload(status))
+        return
+      }
+      gpuUploads += 2
+      hasDirectFrame = true
+    } else if let buffer, version != uploadedVersion {
       let width = CVPixelBufferGetWidth(buffer)
       let height = CVPixelBufferGetHeight(buffer)
       let top = layout == .fullWidth ? height / 4 : 0
@@ -132,10 +154,19 @@ final class GLSBSRenderer: NSOpenGLView {
     }
     do {
       let fresh =
-        position.map {
+        (directInput?.isOpen ?? true)
+        && (position.map {
           StereoCamera.now() - $0.timestamp < 0.15
             && Self.insideViewingZone($0.displayMidpointCentimetres)
-        } ?? false
+        } ?? false)
+      if let position {
+        directInput?.track(
+          midpoint: position.displayViewMidpointCentimetres,
+          ipdMillimetres: position.viewInterpupillaryDistanceMillimetres,
+          timestamp: position.timestamp, valid: fresh)
+      } else {
+        directInput?.track(midpoint: .zero, ipdMillimetres: 0, timestamp: 0, valid: false)
+      }
       var vertices: [Float] = []
       for p in [SIMD2<Float>(-1, 1), SIMD2<Float>(-1, -3), SIMD2<Float>(3, 1)] {
         vertices += [p.x, p.y, 0, 1]
@@ -153,11 +184,20 @@ final class GLSBSRenderer: NSOpenGLView {
       guard status == 0 else {
         throw WeaverRenderFailure.draw(status)
       }
+      if let directFrame {
+        // Return producer surfaces as soon as the GPU has copied/read them.
+        // The producer can render its next pair while the window waits to swap.
+        glFinish()
+        consumed = true
+        directFrame.complete(consumed: true)
+      }
       context.flushBuffer()
       glFinish()
+      consumed = true
       renderedFrames += 1
-      presented?(fresh)
+      presented?(fresh && (directInput?.isOpen ?? true))
     } catch {
+      glFinish()
       presented?(false)
       failure?(error)
     }

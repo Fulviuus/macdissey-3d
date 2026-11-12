@@ -3,6 +3,10 @@ import Foundation
 public struct StereoTrackingPose {
   public let firstCameraEyeMillimetres, secondCameraEyeMillimetres: SIMD3<Float>
   public let displayMidpointCentimetres: SIMD3<Float>
+  /// Measured viewing position for scene cameras, before optical prediction.
+  public let displayViewMidpointCentimetres: SIMD3<Float>
+  /// Length of the existing rolling interocular mean, rather than one frame.
+  public let viewInterpupillaryDistanceMillimetres: Float
   public let timestamp: Double
   public let reprojectionError: Double
 }
@@ -100,9 +104,15 @@ public final class StereoTrackingGeometry {
     let display1 = try transform.apply(
       centimetres: SIMD3(
         Float(predicted.right.x), Float(predicted.right.y), Float(predicted.right.z)))
+    let viewMidpoint = try transform.apply(centimetres: (c0 + c1) * Float(0.5))
+    let meanIPD = history.ipd
     return StereoTrackingPose(
       firstCameraEyeMillimetres: stabilized.0, secondCameraEyeMillimetres: stabilized.1,
-      displayMidpointCentimetres: (display0 + display1) * Float(0.5), timestamp: captureTimestamp,
+      displayMidpointCentimetres: (display0 + display1) * Float(0.5),
+      displayViewMidpointCentimetres: viewMidpoint,
+      viewInterpupillaryDistanceMillimetres: Float(
+        hypot(hypot(meanIPD.x, meanIPD.y), meanIPD.z) * 10),
+      timestamp: captureTimestamp,
       reprojectionError: max(eye0.reprojectionError, eye1.reprojectionError))
   }
 }

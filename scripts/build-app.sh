@@ -14,7 +14,8 @@ python3 scripts/prepare-face-inference.py
 python3 scripts/prepare-archive.py
 python3 scripts/prepare-video-depth.py
 sh scripts/build-icon.sh
-swift build -c release --product OdysseyMenu -Xswiftc -file-prefix-map -Xswiftc "$PWD=."
+# Packaging and standalone checks use the native SwiftPM .build/release layout.
+swift build --build-system native -c release --product OdysseyMenu -Xswiftc -file-prefix-map -Xswiftc "$PWD=."
 bundle="${1:-$PWD/dist/macdissey 3d.app}"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 mkdir -p "$bundle/Contents/Resources/Models" "$bundle/Contents/Resources/Weaver"

@@ -33,8 +33,9 @@ preferences are unchanged.
 Download the Apple silicon ZIP from [Releases](https://github.com/Fulviuus/macdissey-3d/releases/latest),
 unzip it, and drag **macdissey 3d.app** into **Applications**.
 
-**The app is not signed with an Apple Developer ID or notarized by Apple.**
-macOS Gatekeeper may block the first launch. If you trust this download:
+Official app releases starting with **v0.8.0** are signed with a Developer ID
+Application certificate and notarized by Apple. Earlier releases were ad-hoc
+signed. If macOS blocks an older release and you trust the download:
 
 1. Open the app once, then dismiss the security alert.
 2. Go to **System Settings → Privacy & Security** and scroll to **Security**.
@@ -49,7 +50,7 @@ the app after changing permissions if requested.
 ### Updating
 
 Quit the app before replacing it, and keep one installed copy in **Applications**.
-Public releases are ad-hoc signed, so an update may require granting Camera or
+Updating from an older ad-hoc-signed release may require granting Camera or
 Screen Recording permission again. If the toggle is enabled but capture is still
 denied, remove the old Screen Recording entry with **−**, add the installed app
 with **+**, enable it, then quit and reopen it.
@@ -127,6 +128,31 @@ The monochrome menu bar icon adapts to the system appearance.
 
 Protected video may not be available to ScreenCaptureKit. The app does not bypass
 capture restrictions imposed by a player or streaming service.
+
+## Native app connections (development feature)
+
+Available in v0.8.0 and later.
+
+Integrated apps can connect directly while macdissey is running. Enable **Allow
+App Connections** once in the menu to allow automatic sessions and tracking
+feedback to the connected app. The interface is off by default. A connected
+app supplies separate GPU-rendered left and right eye views; macdissey starts
+tracking and calibrated fullscreen 3D automatically. Screen capture, SBS packing
+by the producer, AI depth estimation and activation shortcuts are not required.
+Camera permission is still needed. **Escape** stops playback, and client shutdown
+or a lost heartbeat also stops the session and restores the desktop mode.
+
+The native `MacdisseyClient` Swift package and `MacdisseyIPC` C API transfer
+IOSurface capabilities over local Mach messages. Pixel data stays on the GPU;
+the host copies the eye views into the existing weaver's texture with GPU blits.
+Direct output requests the monitor's active refresh rate. Only one producer can
+own a session, with bounded frame delivery and explicit buffer-reuse completion.
+Factory calibration, optical shaders and tracking arithmetic are unchanged.
+
+This is an integration API, not automatic stereo support for unmodified games or
+compatibility with Samsung's Windows SDK. Engine plugins and sandboxed apps need
+their own integration. See [the developer guide](Docs/DirectStereo.md), including
+the working Metal demo and colour-space and synchronization requirements.
 
 ## Keyboard shortcuts
 
@@ -283,6 +309,18 @@ The build also supports a private local identity configured in the ignored
 fields identify a dedicated signing keychain. Signing failures stop the build;
 they never silently fall back to ad-hoc signing. Set the environment variable to
 `-` explicitly when packaging an ad-hoc build for distribution.
+
+For Developer ID distribution, set `MACDISSEY_SIGNING_IDENTITY` to your Developer
+ID Application identity and `MACDISSEY_DISTRIBUTION_SIGNING=1` when building. This
+requires an explicit identity, signs all bundled native code with the hardened
+runtime and a secure timestamp, and verifies the resulting Developer ID signature.
+The app's camera entitlement preserves tracking access under the hardened runtime;
+macOS still requires the user's Camera permission.
+Before publishing, submit a ZIP of the signed bundle with `xcrun notarytool submit`
+using your saved Keychain profile. After Apple accepts it, run `xcrun stapler staple`
+and `xcrun stapler validate` on the app, verify it with `spctl --assess --type execute`,
+then create the final distribution ZIP and its checksum. Notarization credentials
+stay in Keychain and are never included in the repository or release.
 
 Keep only one launchable installation registered with macOS. Launching test
 bundles with the same identifier can make permission-driven relaunches select

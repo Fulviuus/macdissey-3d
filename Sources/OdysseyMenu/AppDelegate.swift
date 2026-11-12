@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import MacdisseyClient
 import OSLog
 import OdysseyConversion
 import OdysseyCore
@@ -33,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let alerts = AlertPresenter()
   private var factoryProfile: FactoryProfile?
   private var factoryLoading = false
+  private var directHost: DirectStereoHost?
+  private var directAppName: String?
+  private var allowsAppConnections: Bool {
+    UserDefaults.standard.object(forKey: "allowAppConnections") as? Bool ?? false
+  }
   private var factoryStatus = "Connect the Odyssey video and USB cables."
   private lazy var settings = SettingsWindowController(
     currentShortcut: { [weak self] in self?.shortcut ?? .standard },
@@ -65,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     statusItem.menu = menu
     rebuildMenu()
     loadFactoryProfile()
+    configureAppConnections()
     do { try changeShortcut(to: shortcut) } catch { show(error.localizedDescription) }
     do {
       conversionKey = try HotKey(
@@ -152,6 +159,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.removeAllItems()
     menu.addItem(item("About macdissey 3d…", #selector(showAbout)))
     menu.addItem(item("Settings…", #selector(showSettings)))
+    let connections = item("Allow App Connections", #selector(toggleAppConnections))
+    connections.state = allowsAppConnections ? .on : .off
+    connections.toolTip =
+      "Let integrated apps on this Mac start 3D automatically and receive tracking positions."
+    menu.addItem(connections)
+    let connectionStatus = NSMenuItem(
+      title: directAppName.map { "Connected app: " + $0 }
+        ?? (directHost == nil ? "App connections unavailable" : "Waiting for an app"),
+      action: nil, keyEquivalent: "")
+    if allowsAppConnections { menu.addItem(connectionStatus) }
     menu.addItem(.separator())
     let toggle = item(
       changing
@@ -204,8 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   private func refreshStatus() {
+    let status = directAppName.map { $0 + " · " + threeDStatus } ?? threeDStatus
     statusItem.button?.toolTip =
-      "macdissey 3d — " + (running || changing ? threeDStatus : factoryStatus)
+      "macdissey 3d — " + (running || changing ? status : factoryStatus)
   }
 
   @objc private func selectLayout(_ sender: NSMenuItem) {
@@ -305,15 +323,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
-  private func activate3D(mode: PresentationMode) {
-    guard !stopping, !settings.isRecording else { return }
+  private func activate3D(
+    mode: PresentationMode, completion: ((Result<Void, Error>) -> Void)? = nil
+  ) {
+    guard !stopping, !settings.isRecording else {
+      completion?(.failure(AppError.unavailable("3D is busy.")))
+      return
+    }
     if running || changing {
-      stop3D()
+      if let completion {
+        completion(.failure(AppError.unavailable("3D is already active.")))
+      } else {
+        stop3D()
+      }
       return
     }
     let screens = NSScreen.screens.filter(Hardware.isOdyssey)
     guard screens.count == 1, let screen = screens.first, let profile = factoryProfile else {
-      show(factoryStatus)
+      if let completion {
+        completion(.failure(AppError.unavailable(factoryStatus)))
+      } else {
+        show(factoryStatus)
+      }
       return
     }
     do {
@@ -324,7 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     } catch {
       escapeKey = nil
       conversionControls = []
-      show(error.localizedDescription)
+      if let completion { completion(.failure(error)) } else { show(error.localizedDescription) }
       return
     }
     settings.close()
@@ -338,17 +369,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       do {
         try await threeD.start(on: screen, profile: profile)
         running = true
+        completion?(.success(()))
       } catch {
         running = false
         escapeKey = nil
         conversionControls = []
         threeDStatus = "3D is off"
         if !(error is CancellationError) { failureMessage = error.localizedDescription }
+        completion?(.failure(error))
       }
       if !stopping { changing = false }
       startTask = nil
       rebuildMenu()
-      if let failureMessage, !stopping, !terminationPending { show(failureMessage) }
+      if completion == nil, let failureMessage, !stopping, !terminationPending {
+        show(failureMessage)
+      }
     }
   }
 
@@ -356,6 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     guard (running || changing) && !stopping else { return }
     logger.notice("Stopping 3D: \(reason, privacy: .public)")
     stopping = true
+    if threeD.mode == .direct {
+      directAppName = nil
+      directHost?.endSession()
+    }
     let pendingStart = startTask
     pendingStart?.cancel()
     changing = true
@@ -378,6 +417,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let action = afterStop
       afterStop = nil
       action?()
+    }
+  }
+
+  @objc private func toggleAppConnections() {
+    UserDefaults.standard.set(!allowsAppConnections, forKey: "allowAppConnections")
+    configureAppConnections()
+    rebuildMenu()
+  }
+
+  private func configureAppConnections() {
+    guard allowsAppConnections else {
+      directHost?.stop()
+      directHost = nil
+      directAppName = nil
+      return
+    }
+    guard directHost == nil else { return }
+    do {
+      directHost = try DirectStereoHost(
+        begin: { [weak self] configuration, input, reply in
+          Task { @MainActor in
+            guard let self else {
+              reply(.failure(AppError.unavailable("macdissey is closing.")))
+              return
+            }
+            self.startDirect(configuration, input: input, reply: reply)
+          }
+        },
+        end: { [weak self] input in
+          Task { @MainActor in
+            guard let self, self.threeD.directInput === input else { return }
+            self.directAppName = nil
+            if self.threeD.mode == .direct {
+              self.stop3D(reason: "direct stereo client ended")
+            }
+            self.rebuildMenu()
+          }
+        })
+    } catch { logger.error("App connections: \(error.localizedDescription, privacy: .public)") }
+  }
+
+  private func startDirect(
+    _ configuration: DirectStereoConfiguration, input: DirectStereoInput,
+    reply: @escaping (Result<DirectStereoOutput, Error>) -> Void
+  ) {
+    Task { @MainActor in
+      do {
+        while stopping {
+          guard input.isOpen, allowsAppConnections else { throw CancellationError() }
+          try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard !running, !changing, !stopping else {
+          throw AppError.unavailable("3D is already active.")
+        }
+        if factoryProfile == nil { loadFactoryProfile() }
+        while factoryLoading {
+          guard input.isOpen, allowsAppConnections else { throw CancellationError() }
+          try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard input.isOpen, allowsAppConnections, !running, !changing, !stopping else {
+          throw AppError.unavailable("The direct stereo request was cancelled or 3D is busy.")
+        }
+        threeD.directInput = input
+        activate3D(mode: .direct) { [weak self = self] result in
+          guard let self else {
+            reply(.failure(CancellationError()))
+            return
+          }
+          switch result {
+          case .failure(let error):
+            if self.threeD.directInput === input { self.threeD.directInput = nil }
+            reply(.failure(error))
+          case .success:
+            guard let output = self.threeD.directOutput else {
+              reply(.failure(AppError.unavailable("Direct output did not initialize.")))
+              self.stop3D()
+              return
+            }
+            self.directAppName =
+              NSRunningApplication(processIdentifier: configuration.processID)?.localizedName
+              ?? configuration.name
+            self.threeDStatus = "Connected: " + (self.directAppName ?? configuration.name)
+            self.rebuildMenu()
+            reply(.success(output))
+          }
+        }
+      } catch { reply(.failure(error)) }
     }
   }
 

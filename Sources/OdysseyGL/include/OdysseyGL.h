@@ -20,6 +20,10 @@ int odyssey_gl_source(OdysseyGL *renderer, const uint8_t *pixels, int width, int
 // pixel buffer until its GL work completes. Nonzero permits a CPU-path fallback.
 int odyssey_gl_source_surface(OdysseyGL *renderer, IOSurfaceRef surface, int crop_top,
                               int crop_height);
+// Direct producer path: separate, top-first BGRA eye surfaces. The two GPU
+// blits feed the original shader without any CPU pixel copy or optical changes.
+// Retain both surfaces unchanged until GL work completes.
+int odyssey_gl_source_eyes(OdysseyGL *renderer, IOSurfaceRef left, IOSurfaceRef right);
 // Vertices are original 3x16 floats: XYZW,phase4,ray4,screen2,weave2.
 // Draw into the caller's framebuffer at exactly3840x2160. woven=false shows
 // the original shader's left view; it does not invent a tracking position.

@@ -1,5 +1,6 @@
 import AppKit
 import IOKit.graphics
+import MacdisseyClient
 import OdysseyCamera
 import OdysseyConversion
 import OdysseyCore
@@ -59,7 +60,7 @@ private final class ThreeDCaptureSink: NSObject, SCStreamOutput, SCStreamDelegat
   func stream(_ stream: SCStream, didStopWithError error: Error) { failure?(error) }
 }
 
-enum PresentationMode { case video, desktop, conversion }
+enum PresentationMode { case video, desktop, conversion, direct }
 
 @MainActor final class ThreeDSession {
   private var stream: SCStream?, sink: ThreeDCaptureSink?, window: NSWindow?,
@@ -76,6 +77,19 @@ enum PresentationMode { case video, desktop, conversion }
   var allowsLensActivation = true
   var mode: PresentationMode = .video
   var depthModel: DepthModelConfiguration?
+  var directInput: DirectStereoInput?
+  var directOutput: DirectStereoOutput? {
+    guard mode == .direct, let outputColorSpace,
+      let current = CGDisplayCopyDisplayMode(displayID)
+    else { return nil }
+    let size = CGDisplayScreenSize(displayID)
+    let maximumRate =
+      NSScreen.screens.first { Hardware.displayID($0) == displayID }?.maximumFramesPerSecond ?? 60
+    return DirectStereoOutput(
+      refreshRate: current.refreshRate > 0 ? current.refreshRate : Double(maximumRate),
+      displaySizeMillimetres: SIMD2(Float(size.width), Float(size.height)),
+      colorSpace: outputColorSpace)
+  }
   var stereoSettings = StereoInputSettings()
   private var usesStereoDecoder: Bool {
     mode == .video && stereoSettings.requiresDecoder
@@ -101,7 +115,10 @@ enum PresentationMode { case video, desktop, conversion }
   }
 
   func start(on screen: NSScreen, profile: FactoryProfile) async throws {
-    try await ScreenCaptureAccess.check()
+    if mode != .direct { try await ScreenCaptureAccess.check() }
+    if mode == .direct && directInput == nil {
+      throw AppError.unavailable("No direct stereo producer is connected.")
+    }
     try Task.checkCancellation()
     if !StereoCamera.authorized {
       guard await StereoCamera.requestAuthorization() else { throw StereoCameraError.permission }
@@ -162,6 +179,8 @@ enum PresentationMode { case video, desktop, conversion }
       let lens = LensOutput { [weak self] error in Task { @MainActor in self?.failure?(error) } }
       self.lens = lens
       try await lens.start(port: port)
+      try Task.checkCancellation()
+      if mode == .direct && directInput?.isOpen != true { throw CancellationError() }
       displayID = id
       savedMode = saved
       // Arm recovery before changing the display, including during startup.
@@ -180,6 +199,11 @@ enum PresentationMode { case video, desktop, conversion }
       guard let renderer = try GLSBSRenderer(size: activeScreen.frame.size, profile: profile)
       else { throw WeaverRenderFailure.view }
       self.renderer = renderer
+      if mode == .direct {
+        renderer.directInput = directInput
+        renderer.preferredFramesPerSecond =
+          native.refreshRate > 0 ? native.refreshRate : Double(activeScreen.maximumFramesPerSecond)
+      }
       // submit only publishes under a lock; all OpenGL work remains on the
       // main thread. Avoid scheduling a retaining task per converted frame.
       conversionDelivery?.connect { [weak renderer] in renderer?.submit($0) }
@@ -215,55 +239,57 @@ enum PresentationMode { case video, desktop, conversion }
       window.setFrame(activeScreen.frame, display: true)
       self.window = window
       window.orderFrontRegardless()
-      let content = try await SCShareableContent.excludingDesktopWindows(
-        false, onScreenWindowsOnly: false)
-      guard let display = content.displays.first(where: { $0.displayID == id }),
-        let application = content.applications.first(where: {
-          $0.processID == ProcessInfo.processInfo.processIdentifier
-        })
-      else {
-        throw AppError.unavailable("Cannot capture the Odyssey while excluding the 3D overlay.")
-      }
-      if mode == .desktop {
-        let desktop = DesktopCapture(
-          displayID: id, renderer: renderer,
-          colorSpace: outputColorSpace
-        ) { [weak self] error in
-          self?.failure?(error)
+      if mode != .direct {
+        let content = try await SCShareableContent.excludingDesktopWindows(
+          false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first(where: { $0.displayID == id }),
+          let application = content.applications.first(where: {
+            $0.processID == ProcessInfo.processInfo.processIdentifier
+          })
+        else {
+          throw AppError.unavailable("Cannot capture the Odyssey while excluding the 3D overlay.")
         }
-        desktopCapture = desktop
-        try await desktop.start()
-      } else {
-        let sink = ThreeDCaptureSink()
-        sink.renderer = renderer
-        sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
-        sink.converter = converter
-        if usesStereoDecoder {
-          let settings = stereoSettings
-          sink.stereoInput = try await Task.detached {
-            try StereoInputConverter(
-              settings: settings, shaders: resources.appendingPathComponent("StereoShaders"))
-          }.value
+        if mode == .desktop {
+          let desktop = DesktopCapture(
+            displayID: id, renderer: renderer,
+            colorSpace: outputColorSpace
+          ) { [weak self] error in
+            self?.failure?(error)
+          }
+          desktopCapture = desktop
+          try await desktop.start()
+        } else {
+          let sink = ThreeDCaptureSink()
+          sink.renderer = renderer
+          sink.colors = DisplayColorPipeline(outputColorSpace: outputColorSpace)
+          sink.converter = converter
+          if usesStereoDecoder {
+            let settings = stereoSettings
+            sink.stereoInput = try await Task.detached {
+              try StereoInputConverter(
+                settings: settings, shaders: resources.appendingPathComponent("StereoShaders"))
+            }.value
+          }
+          sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
+          self.sink = sink
+          let config = SCStreamConfiguration()
+          config.width = mode == .conversion ? 1920 : 3840
+          config.height = mode == .conversion ? 1080 : 2160
+          config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+          config.queueDepth = 3
+          // The default capture colour space is the display's own profile.
+          // Avoid sRGB conversion, which also discards wide-gamut colours.
+          config.pixelFormat = kCVPixelFormatType_32BGRA
+          config.showsCursor = false
+          config.capturesAudio = false
+          let stream = SCStream(
+            filter: SCContentFilter(
+              display: display, excludingApplications: [application], exceptingWindows: []),
+            configuration: config, delegate: sink)
+          try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
+          self.stream = stream
+          try await stream.startCapture()
         }
-        sink.failure = { [weak self] error in Task { @MainActor in self?.failure?(error) } }
-        self.sink = sink
-        let config = SCStreamConfiguration()
-        config.width = mode == .conversion ? 1920 : 3840
-        config.height = mode == .conversion ? 1080 : 2160
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        config.queueDepth = 3
-        // The default capture colour space is the display's own profile.
-        // Avoid sRGB conversion, which also discards wide-gamut colours.
-        config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = false
-        config.capturesAudio = false
-        let stream = SCStream(
-          filter: SCContentFilter(
-            display: display, excludingApplications: [application], exceptingWindows: []),
-          configuration: config, delegate: sink)
-        try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
-        self.stream = stream
-        try await stream.startCapture()
       }
       let camera = StereoCamera(tracker: tracker)
       self.camera = camera
@@ -281,6 +307,8 @@ enum PresentationMode { case video, desktop, conversion }
   func stop() async {
     conversionDelivery?.disconnect()
     conversionDelivery = nil
+    directInput?.close()
+    directInput = nil
     renderer?.presented = nil
     await lens?.stop()
     lens = nil

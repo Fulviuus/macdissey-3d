@@ -2,13 +2,16 @@ import AppKit
 import QuartzCore
 
 @MainActor enum DisplayFrameClock {
-  static func start(for view: NSView, draw: @escaping () -> Void) -> CADisplayLink {
+  static func start(for view: NSView, framesPerSecond: Double = 60, draw: @escaping () -> Void)
+    -> CADisplayLink
+  {
     let target = DisplayFrameTarget(draw: draw)
-    // Keep the 60 Hz rendering budget while following this view's display.
+    // Follow this view's display, keeping the default 60 Hz capture budget.
     // The link retains its target; callers can capture their view weakly.
     let link = view.displayLink(
       target: target, selector: #selector(DisplayFrameTarget.displayFrame(_:)))
-    link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+    let rate = Float(max(30, min(240, framesPerSecond.isFinite ? framesPerSecond : 60)))
+    link.preferredFrameRateRange = CAFrameRateRange(minimum: rate, maximum: rate, preferred: rate)
     link.add(to: .main, forMode: .common)
     return link
   }

@@ -12,8 +12,19 @@ let portablePaths = "-ffile-prefix-map=\(root)=."
 let package = Package(
   name: "Macdissey3D",
   platforms: [.macOS(.v14)],
-  products: [.executable(name: "OdysseyMenu", targets: ["OdysseyMenu"])],
+  products: [
+    .executable(name: "OdysseyMenu", targets: ["OdysseyMenu"]),
+    .library(name: "MacdisseyClient", targets: ["MacdisseyClient"]),
+    .library(name: "MacdisseyIPC", targets: ["MacdisseyIPC"]),
+  ],
   targets: [
+    .target(
+      name: "MacdisseyIPC", linkerSettings: [.linkedFramework("IOSurface"), .linkedLibrary("bsm")]),
+    .target(name: "MacdisseyClient", dependencies: ["MacdisseyIPC"]),
+    .executableTarget(name: "DirectStereoDemo", dependencies: ["MacdisseyClient"]),
+    .executableTarget(
+      name: "DirectStereoChecks", dependencies: ["MacdisseyClient", "MacdisseyIPC"],
+      path: "Tests/DirectStereoChecks"),
     .target(
       name: "OdysseyVision",
       cxxSettings: [
@@ -63,7 +74,7 @@ let package = Package(
       name: "OdysseyMenu",
       dependencies: [
         "OdysseyCore", "OdysseyCamera", "OdysseyGL", "OdysseyRendering", "OdysseyMonitor",
-        "OdysseyConversion",
+        "OdysseyConversion", "MacdisseyClient",
       ]),
     .executableTarget(
       name: "DisplayColorChecks", dependencies: ["OdysseyRendering"],
@@ -76,6 +87,9 @@ let package = Package(
     // Command Line Tools installations do not ship XCTest. These checks
     // run on the same minimal toolchain used to build the application.
     .executableTarget(name: "CoreChecks", dependencies: ["OdysseyCore"], path: "Tests/CoreChecks"),
+    .executableTarget(
+      name: "StereoViewTrackingChecks", dependencies: ["OdysseyCore"],
+      path: "Tests/StereoViewTrackingChecks"),
     .executableTarget(
       name: "FactoryCalibrationChecks", dependencies: ["OdysseyCore"],
       path: "Tests/FactoryCalibrationChecks"),

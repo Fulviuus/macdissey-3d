@@ -109,3 +109,57 @@ for (width, height, top, crop) in [(16, 8, 0, 8), (16, 8, 2, 4), (7680, 2160, 0,
     }
   }
 }
+
+// Direct producers supply separate eye surfaces, without packing a fullscreen
+// capture. Verify every output byte against the established CPU source path.
+for (width, height) in [(8, 8), (1920, 2160), (3840, 2160)] {
+  var eyes: [CVPixelBuffer] = []
+  var combined = [UInt8](repeating: 0, count: width * 2 * height * 4)
+  for eye in 0..<2 {
+    var buffer: CVPixelBuffer?
+    precondition(
+      CVPixelBufferCreate(
+        nil, width, height, kCVPixelFormatType_32BGRA,
+        [
+          kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+          kCVPixelBufferOpenGLCompatibilityKey as String: true,
+        ] as CFDictionary, &buffer) == kCVReturnSuccess)
+    let value = buffer!
+    CVPixelBufferLockBaseAddress(value, [])
+    let bytes = CVPixelBufferGetBaseAddress(value)!.assumingMemoryBound(to: UInt8.self)
+    let pitch = CVPixelBufferGetBytesPerRow(value)
+    for y in 0..<height {
+      for x in 0..<width {
+        let color: [UInt8] = [UInt8((x + eye * 47) % 251), UInt8(y % 251), UInt8(eye * 100), 255]
+        for channel in 0..<4 {
+          bytes[y * pitch + x * 4 + channel] = color[channel]
+          combined[(y * width * 2 + eye * width + x) * 4 + channel] = color[channel]
+        }
+      }
+    }
+    CVPixelBufferUnlockBaseAddress(value, [])
+    eyes.append(value)
+  }
+  precondition(
+    odyssey_gl_source(
+      renderer, combined, Int32(width * 2), Int32(height), width * 8, 0, Int32(height)) == 0)
+  let expected = read()
+  let left = CVPixelBufferGetIOSurface(eyes[0])!.takeUnretainedValue()
+  let right = CVPixelBufferGetIOSurface(eyes[1])!.takeUnretainedValue()
+  precondition(odyssey_gl_source_eyes(renderer, left, right) == 0)
+  precondition(
+    read() == expected, "Direct eyes changed channels, eye order, image orientation or sampling")
+  precondition(odyssey_gl_source_eyes(renderer, left, nil) != 0)
+  if width == 1920 {
+    let start = ProcessInfo.processInfo.systemUptime
+    for _ in 0..<30 {
+      precondition(odyssey_gl_source_eyes(renderer, left, right) == 0)
+      glFinish()
+    }
+    print(
+      String(
+        format: "Direct eye GPU import+completion: %.3f ms/frame",
+        (ProcessInfo.processInfo.systemUptime - start) * 1000 / 30))
+  }
+  print("PASS direct eye surfaces: full framebuffer equality, each eye \(width)×\(height)")
+}

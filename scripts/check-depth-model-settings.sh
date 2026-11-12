@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p .build/settings-checks
-swift build -c release --product DepthModelChecks
+swift build --build-system native -c release --product DepthModelChecks
 # Link only current sources; removed model implementations may leave stale .o files.
 set --
 for source in Sources/OdysseyConversion/*.swift; do

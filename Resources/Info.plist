@@ -13,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.7.1</string>
+	<string>0.8.0</string>
 	<key>CFBundleVersion</key>
-	<string>20</string>
+	<string>21</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -23,7 +23,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>macdissey 3d uses the monitor’s stereo camera to position the glasses-free 3D image for your eyes. Camera images stay on this Mac.</string>
+	<string>macdissey 3d uses the monitor’s stereo camera to position the glasses-free 3D image for your eyes. Camera images stay on this Mac. When app connections are enabled, tracking positions can be shared with the connected app.</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 </dict>
