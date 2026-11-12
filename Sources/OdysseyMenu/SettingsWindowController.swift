@@ -8,6 +8,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     wrappingLabelWithString: "Start stereo video from any app, or stop the active 3D mode.")
   private let editButton = NSButton(title: "Edit Shortcut…", target: nil, action: nil)
   private let loginSwitch = NSSwitch()
+  private let layoutPopup = NSPopUpButton()
+  private let layoutHelp = NSTextField(wrappingLabelWithString: "")
   private let loginHelp = NSTextField(
     wrappingLabelWithString: "Open macdissey 3d in the menu bar when you log in to your Mac.")
   private let approvalButton = NSButton(
@@ -18,15 +20,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let showStereoInput: () -> Void
   private let showDepthModels: () -> Void
   private let applyShortcut: (KeyboardShortcut) throws -> Void
+  private let currentLayout: () -> SBSLayout?
+  private let applyLayout: (SBSLayout) -> Void
 
   init(
     currentShortcut: @escaping () -> KeyboardShortcut,
     applyShortcut: @escaping (KeyboardShortcut) throws -> Void,
+    currentLayout: @escaping () -> SBSLayout? = { .fullWidth },
+    applyLayout: @escaping (SBSLayout) -> Void = { _ in },
     showStereoInput: @escaping () -> Void = {},
     showDepthModels: @escaping () -> Void = {}
   ) {
     self.currentShortcut = currentShortcut
     self.applyShortcut = applyShortcut
+    self.currentLayout = currentLayout
+    self.applyLayout = applyLayout
     self.showStereoInput = showStereoInput
     self.showDepthModels = showDepthModels
     let window = NSWindow(
@@ -40,6 +48,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     buildContent()
     refreshLogin()
     refreshShortcut()
+    refreshLayout()
     NotificationCenter.default.addObserver(
       self, selector: #selector(refreshLogin),
       name: NSApplication.didBecomeActiveNotification, object: nil)
@@ -49,6 +58,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   func present() {
     refreshShortcut()
     refreshLogin()
+    refreshLayout()
     NSApp.activate(ignoringOtherApps: true)
     showWindow(nil)
     window?.makeKeyAndOrderFront(nil)
@@ -85,6 +95,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let stereoButton = NSButton(
       title: "Stereo Input…", target: self, action: #selector(openStereoInput))
     stereoButton.bezelStyle = .rounded
+    let stereoHeading = NSStackView(views: [shortcutLabel, NSView(), stereoButton])
+    stereoHeading.orientation = .horizontal
+    stereoHeading.alignment = .centerY
+    let layoutLabel = NSTextField(labelWithString: "Side-by-side picture")
+    for layout in [SBSLayout.halfWidth, .fullWidth] {
+      layoutPopup.addItem(withTitle: layout.title)
+      layoutPopup.lastItem?.tag = layout.rawValue
+    }
+    layoutPopup.target = self
+    layoutPopup.action = #selector(changeLayout)
+    layoutPopup.setAccessibilityLabel("Side-by-side picture")
+    let layoutRow = NSStackView(views: [layoutLabel, NSView(), layoutPopup])
+    layoutRow.orientation = .horizontal
+    layoutRow.alignment = .centerY
+    layoutHelp.font = .systemFont(ofSize: 12)
+    layoutHelp.textColor = .secondaryLabelColor
     let divider = NSBox()
     divider.boxType = .separator
     let conversionTitle = NSTextField(labelWithString: "2D video conversion (Experimental)")
@@ -120,7 +146,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let keyLegend = NSTextField(labelWithString: "⌃ Control    ⇧ Shift    ⌥ Option    ⌘ Command")
     let menuHelp = NSTextField(
       wrappingLabelWithString:
-        "Use the menu for Desktop 3D, picture layout and Quit. Opening the menu also stops 3D.")
+        "Use the menu for Desktop 3D and Quit. Opening the menu also stops 3D.")
     for label in [conversionHelp, keyLegend, menuHelp] {
       label.font = .systemFont(ofSize: 12)
       label.textColor = .secondaryLabelColor
@@ -132,7 +158,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let stack = NSStackView(
       views: [
         title, loginRow, loginHelp, approvalButton,
-        divider, shortcutLabel, shortcutRow, shortcutHelp, stereoButton,
+        divider, stereoHeading, shortcutRow, shortcutHelp, layoutRow, layoutHelp,
         conversionDivider, conversionHeading,
       ] + references + [conversionHelp, exitDivider, exitRow, keyLegend, menuHelp])
     stack.orientation = .vertical
@@ -140,7 +166,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     stack.spacing = 10
     stack.setCustomSpacing(20, after: title)
     stack.translatesAutoresizingMaskIntoConstraints = false
-    content.addSubview(stack)
+    let scroll = NSScrollView()
+    scroll.hasVerticalScroller = true
+    scroll.scrollerStyle = .legacy
+    scroll.autohidesScrollers = true
+    scroll.drawsBackground = false
+    scroll.translatesAutoresizingMaskIntoConstraints = false
+    content.addSubview(scroll)
+    let document = FlippedSettingsView()
+    document.translatesAutoresizingMaskIntoConstraints = false
+    scroll.documentView = document
+    document.addSubview(stack)
     for view in references + [exitRow] {
       view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
@@ -148,10 +184,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
       view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
-      stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-      stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
-      stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -24),
+      scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+      scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+      scroll.topAnchor.constraint(equalTo: content.topAnchor),
+      scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+      document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+      stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
+      stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+      stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
+      stereoHeading.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      layoutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+      layoutHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
       loginRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
       shortcutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
       loginHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -164,11 +208,30 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
   @objc private func openStereoInput() { showStereoInput() }
 
+  private func refreshLayout() {
+    let layout = currentLayout()
+    layoutPopup.isEnabled = layout != nil
+    if let layout {
+      layoutPopup.selectItem(withTag: layout.rawValue)
+    } else {
+      layoutPopup.select(nil)
+    }
+    layoutHelp.stringValue =
+      layout?.help ?? "Choose a side-by-side format in Stereo Input to change picture sizing."
+  }
+
+  @objc private func changeLayout() {
+    guard currentLayout() != nil,
+      let layout = SBSLayout(rawValue: layoutPopup.selectedTag())
+    else { return }
+    applyLayout(layout)
+    refreshLayout()
+  }
+
   @objc private func refreshLogin() {
     let status = SMAppService.mainApp.status
     loginSwitch.state = status == .enabled || status == .requiresApproval ? .on : .off
     approvalButton.isHidden = status != .requiresApproval
-    window?.setContentSize(NSSize(width: 540, height: status == .requiresApproval ? 690 : 650))
     loginHelp.stringValue =
       status == .requiresApproval
       ? "Allow macdissey 3d in Login Items to finish enabling launch at login."
@@ -242,3 +305,5 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   func windowWillClose(_ notification: Notification) { cancelRecording() }
   func windowDidResignKey(_ notification: Notification) { cancelRecording() }
 }
+
+private final class FlippedSettingsView: NSView { override var isFlipped: Bool { true } }

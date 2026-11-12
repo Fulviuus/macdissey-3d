@@ -43,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private lazy var settings = SettingsWindowController(
     currentShortcut: { [weak self] in self?.shortcut ?? .standard },
     applyShortcut: { [weak self] value in try self?.changeShortcut(to: value) },
+    currentLayout: { [weak self] in
+      guard let self, self.stereoInput.format.isSBS else { return nil }
+      return self.threeD.layout
+    },
+    applyLayout: { [weak self] layout in self?.selectLayout(layout) },
     showStereoInput: { [weak self] in self?.showStereoOptions() },
     showDepthModels: { [weak self] in self?.showDepthModels() })
 
@@ -164,18 +169,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     connections.toolTip =
       "Let integrated apps on this Mac start 3D automatically and receive tracking positions."
     menu.addItem(connections)
-    let connectionStatus = NSMenuItem(
-      title: directAppName.map { "Connected app: " + $0 }
-        ?? (directHost == nil ? "App connections unavailable" : "Waiting for an app"),
-      action: nil, keyEquivalent: "")
-    if allowsAppConnections { menu.addItem(connectionStatus) }
+    if allowsAppConnections,
+      let status = directAppName.map({ "Connected app: " + $0 })
+        ?? (directHost == nil ? "App connections unavailable" : nil)
+    {
+      menu.addItem(NSMenuItem(title: status, action: nil, keyEquivalent: ""))
+    }
     menu.addItem(.separator())
     let toggle = item(
       changing
         ? (stopping ? "Deactivating 3D…" : "Activating 3D…")
         : (running ? "Deactivate 3D" : "Activate 3D"), #selector(toggle3D))
     toggle.isEnabled = !changing
-    toggle.toolTip = running ? threeDStatus : factoryStatus
+    toggle.toolTip =
+      running
+      ? "Stop 3D and restore the desktop. Press \(shortcut.displayName) or Esc."
+      : "Show a fullscreen stereo video in 3D. Press \(shortcut.displayName) to activate; Esc stops 3D."
     menu.addItem(toggle)
     let conversion = item("Convert 2D Video to 3D (Experimental)", #selector(toggleConversion))
     conversion.isEnabled = !running && !changing
@@ -204,17 +213,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       title: "Stereo Input: " + stereoInput.format.title, action: nil, keyEquivalent: "")
     input.submenu = inputMenu
     menu.addItem(input)
-    for layout in [SBSLayout.halfWidth, .fullWidth] {
-      let option = item(layout.title, #selector(selectLayout(_:)))
-      option.tag = layout.rawValue
-      option.state = stereoInput.format.isSBS && threeD.layout == layout ? .on : .off
-      option.isEnabled = stereoInput.format.isSBS && !running && !changing
-      option.toolTip =
-        layout == .halfWidth
-        ? "Stretch each complete eye view to fill the screen."
-        : "Remove the top and bottom black bars before filling the screen."
-      menu.addItem(option)
-    }
     menu.addItem(.separator())
     menu.addItem(item("Quit macdissey 3d", #selector(quit)))
     refreshStatus()
@@ -226,8 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       "macdissey 3d — " + (running || changing ? status : factoryStatus)
   }
 
-  @objc private func selectLayout(_ sender: NSMenuItem) {
-    guard let layout = SBSLayout(rawValue: sender.tag) else { return }
+  private func selectLayout(_ layout: SBSLayout) {
     var value = stereoInput
     value.format = layout == .fullWidth ? .fullSBS : .halfSBS
     applyStereoInput(value)

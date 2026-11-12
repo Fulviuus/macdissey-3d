@@ -8,13 +8,6 @@ import OpenGL.GL3
 import QuartzCore
 import simd
 
-enum SBSLayout: Int, CaseIterable {
-  case fullWidth, halfWidth
-  var title: String {
-    self == .fullWidth ? "Remove black bars" : "Stretch to fill"
-  }
-}
-
 /// Original GLSL rendered at physical panel resolution. All GL work is on
 /// the main thread; camera and screen callbacks only publish immutable data.
 final class GLSBSRenderer: NSOpenGLView {

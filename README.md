@@ -63,7 +63,8 @@ with **+**, enable it, then quit and reopen it.
 3. Look toward the monitor's camera. Press **Escape**, press the activation
    shortcut again, or open the macdissey menu to stop 3D.
 
-Use **Stretch to fill** for videos whose two eye views are horizontally squeezed.
+In **Settings… → Side-by-side picture**, use **Stretch to fill** for videos whose
+two eye views are horizontally squeezed.
 Use **Remove black bars** for full-width SBS video displayed with top and bottom
 bars. This crops the bars before filling the screen.
 
@@ -170,8 +171,8 @@ Shortcuts work from other apps, including fullscreen players. In Settings,
 | Increase Pop-Out | Control–Shift–6 | Active 2D conversion |
 | Stop any 3D mode | Escape | Any active 3D mode |
 
-Conversion shortcuts are fixed. Desktop 3D, picture layout, and Quit are available
-from the menu. Opening the macdissey menu also stops 3D. While editing the stereo video
+Conversion shortcuts are fixed. Desktop 3D and Quit are available from the menu;
+picture sizing is in Settings. Opening the macdissey menu also stops 3D. While editing the stereo video
 shortcut in Settings, Escape cancels recording the new shortcut.
 
 ## 2D video conversion — experimental

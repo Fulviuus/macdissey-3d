@@ -9,6 +9,7 @@ swiftc Sources/OdysseyMenu/KeyboardShortcut.swift Sources/OdysseyMenu/HotKey.swi
     Tests/AppSettingsChecks/main.swift -o .build/settings-checks/AppSettingsChecks
 .build/settings-checks/AppSettingsChecks
 swiftc -parse-as-library Sources/OdysseyMenu/KeyboardShortcut.swift \
+    Sources/OdysseyMenu/SBSLayout.swift \
     Sources/OdysseyMenu/SettingsWindowController.swift Tests/SettingsLayoutChecks/main.swift \
     -o .build/settings-checks/SettingsLayoutChecks
 .build/settings-checks/SettingsLayoutChecks .build/settings-checks/settings-layout.png
