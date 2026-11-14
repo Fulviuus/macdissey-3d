@@ -2,11 +2,12 @@ import AppKit
 import ServiceManagement
 
 @MainActor
-final class SettingsWindowController: NSWindowController, NSWindowDelegate {
-  private let shortcutValue = NSTextField(labelWithString: "")
+final class SettingsWindowController: NSWindowController {
   private let shortcutHelp = NSTextField(
-    wrappingLabelWithString: "Start stereo video from any app, or stop the active 3D mode.")
-  private let editButton = NSButton(title: "Edit Shortcut…", target: nil, action: nil)
+    wrappingLabelWithString:
+      "Choose the modifiers shared by every app shortcut. Plain Esc stays available to games.")
+  private var modifierButtons: [UInt32: NSButton] = [:]
+  private var shortcutLabels: [ShortcutAction: NSTextField] = [:]
   private let loginSwitch = NSSwitch()
   private let layoutPopup = NSPopUpButton()
   private let layoutHelp = NSTextField(wrappingLabelWithString: "")
@@ -14,25 +15,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     wrappingLabelWithString: "Open macdissey 3d in the menu bar when you log in to your Mac.")
   private let approvalButton = NSButton(
     title: "Open Login Items Settings…", target: nil, action: nil)
-  private var eventMonitor: Any?
-  private(set) var isRecording = false
-  private let currentShortcut: () -> KeyboardShortcut
+  private let currentModifiers: () -> ShortcutModifiers
   private let showStereoInput: () -> Void
   private let showDepthModels: () -> Void
-  private let applyShortcut: (KeyboardShortcut) throws -> Void
+  private let applyModifiers: (ShortcutModifiers) throws -> Void
   private let currentLayout: () -> SBSLayout?
   private let applyLayout: (SBSLayout) -> Void
 
   init(
-    currentShortcut: @escaping () -> KeyboardShortcut,
-    applyShortcut: @escaping (KeyboardShortcut) throws -> Void,
+    currentModifiers: @escaping () -> ShortcutModifiers,
+    applyModifiers: @escaping (ShortcutModifiers) throws -> Void,
     currentLayout: @escaping () -> SBSLayout? = { .fullWidth },
     applyLayout: @escaping (SBSLayout) -> Void = { _ in },
     showStereoInput: @escaping () -> Void = {},
     showDepthModels: @escaping () -> Void = {}
   ) {
-    self.currentShortcut = currentShortcut
-    self.applyShortcut = applyShortcut
+    self.currentModifiers = currentModifiers
+    self.applyModifiers = applyModifiers
     self.currentLayout = currentLayout
     self.applyLayout = applyLayout
     self.showStereoInput = showStereoInput
@@ -43,11 +42,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     window.title = "macdissey 3d Settings"
     window.isReleasedWhenClosed = false
     super.init(window: window)
-    window.delegate = self
     window.center()
     buildContent()
     refreshLogin()
-    refreshShortcut()
+    refreshShortcuts()
     refreshLayout()
     NotificationCenter.default.addObserver(
       self, selector: #selector(refreshLogin),
@@ -56,7 +54,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   func present() {
-    refreshShortcut()
+    refreshShortcuts()
     refreshLogin()
     refreshLayout()
     NSApp.activate(ignoringOtherApps: true)
@@ -76,15 +74,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let spacer = NSView()
     let loginRow = NSStackView(views: [loginLabel, spacer, loginSwitch])
     loginRow.orientation = .horizontal
-    let shortcutLabel = NSTextField(labelWithString: "Stereo video shortcut")
-    shortcutLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-    shortcutValue.font = .systemFont(ofSize: 20, weight: .medium)
-    shortcutValue.setAccessibilityLabel("Stereo video shortcut")
-    editButton.target = self
-    editButton.action = #selector(editShortcut)
-    editButton.bezelStyle = .rounded
-    let shortcutRow = NSStackView(views: [shortcutValue, NSView(), editButton])
-    shortcutRow.orientation = .horizontal
+    let shortcutsTitle = NSTextField(labelWithString: "App shortcuts")
+    shortcutsTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+    var controls: [NSView] = []
+    for choice in ShortcutModifiers.choices {
+      let button = NSButton(
+        checkboxWithTitle: choice.title, target: self, action: #selector(changeModifiers))
+      button.setAccessibilityLabel(choice.title + " modifier for all app shortcuts")
+      modifierButtons[choice.flag] = button
+      controls.append(button)
+    }
+    let modifierRow = NSStackView(views: controls)
+    modifierRow.orientation = .horizontal
+    modifierRow.spacing = 16
     for label in [loginHelp, shortcutHelp] {
       label.font = .systemFont(ofSize: 12)
       label.textColor = .secondaryLabelColor
@@ -95,7 +97,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let stereoButton = NSButton(
       title: "Stereo Input…", target: self, action: #selector(openStereoInput))
     stereoButton.bezelStyle = .rounded
-    let stereoHeading = NSStackView(views: [shortcutLabel, NSView(), stereoButton])
+    let stereoLabel = NSTextField(labelWithString: "Stereo video")
+    stereoLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    let stereoHeading = NSStackView(views: [stereoLabel, NSView(), stereoButton])
     stereoHeading.orientation = .horizontal
     stereoHeading.alignment = .centerY
     let layoutLabel = NSTextField(labelWithString: "Side-by-side picture")
@@ -115,11 +119,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     divider.boxType = .separator
     let conversionTitle = NSTextField(labelWithString: "2D video conversion (Experimental)")
     conversionTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-    func referenceRow(_ action: String, _ keys: String) -> NSStackView {
-      let label = NSTextField(labelWithString: action)
-      let value = NSTextField(labelWithString: keys)
+    func referenceRow(_ action: ShortcutAction) -> NSStackView {
+      let label = NSTextField(labelWithString: action.title)
+      let value = NSTextField(labelWithString: "")
       value.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
-      value.setAccessibilityLabel(action + " shortcut")
+      value.setAccessibilityLabel(action.title + " shortcut")
+      shortcutLabels[action] = value
       let row = NSStackView(views: [label, NSView(), value])
       row.orientation = .horizontal
       return row
@@ -130,19 +135,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let conversionHeading = NSStackView(views: [conversionTitle, NSView(), depthButton])
     conversionHeading.orientation = .horizontal
     conversionHeading.alignment = .centerY
-    let references = [
-      referenceRow("Start conversion / stop 3D", "⌃⇧2"),
-      referenceRow("Show Depth and Pop-Out values", "⌃⇧1"),
-      referenceRow("Decrease 3D Depth", "⌃⇧3"),
-      referenceRow("Increase 3D Depth", "⌃⇧4"),
-      referenceRow("Decrease Pop-Out", "⌃⇧5"),
-      referenceRow("Increase Pop-Out", "⌃⇧6"),
-    ]
+    let baseReferences = [ShortcutAction.stereo, .conversion, .exit].map(referenceRow)
+    let references = ShortcutAction.allCases.filter { $0.adjustment != nil }.map(referenceRow)
     let conversionHelp = NSTextField(
       wrappingLabelWithString:
-        "Depth, Pop-Out and the values overlay work only during 2D video conversion. These shortcuts are fixed."
+        "Depth, Pop-Out and the values overlay work only during 2D video conversion."
     )
-    let exitRow = referenceRow("Stop any 3D mode", "Esc")
     let keyLegend = NSTextField(labelWithString: "⌃ Control    ⇧ Shift    ⌥ Option    ⌘ Command")
     let menuHelp = NSTextField(
       wrappingLabelWithString:
@@ -158,9 +156,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let stack = NSStackView(
       views: [
         title, loginRow, loginHelp, approvalButton,
-        divider, stereoHeading, shortcutRow, shortcutHelp, layoutRow, layoutHelp,
-        conversionDivider, conversionHeading,
-      ] + references + [conversionHelp, exitDivider, exitRow, keyLegend, menuHelp])
+        divider, stereoHeading, layoutRow, layoutHelp,
+        conversionDivider, shortcutsTitle, modifierRow, shortcutHelp,
+      ] + baseReferences + [conversionHeading] + references + [
+        conversionHelp, exitDivider, keyLegend, menuHelp,
+      ])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 10
@@ -177,7 +177,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     document.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = document
     document.addSubview(stack)
-    for view in references + [exitRow] {
+    for view in baseReferences + references {
       view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
     for view in [conversionHelp, menuHelp, conversionDivider, exitDivider, conversionHeading] {
@@ -197,7 +197,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
       layoutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
       layoutHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
       loginRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-      shortcutRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
       loginHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
       shortcutHelp.widthAnchor.constraint(equalTo: stack.widthAnchor),
       divider.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -260,50 +259,33 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
   @objc private func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
-  private func refreshShortcut() { shortcutValue.stringValue = currentShortcut().displayName }
-
-  @objc private func editShortcut() {
-    if isRecording {
-      cancelRecording()
-      return
+  private func refreshShortcuts() {
+    let modifiers = currentModifiers()
+    for (flag, button) in modifierButtons {
+      button.state = modifiers.rawValue & flag != 0 ? .on : .off
     }
-    isRecording = true
-    editButton.title = "Cancel"
-    shortcutValue.stringValue = "Press shortcut…"
-    shortcutHelp.stringValue = "Hold Command, Option or Control and press a key. Esc cancels."
-    eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard let self, self.isRecording, event.window === self.window else { return event }
-      if event.keyCode == 53 {
-        self.cancelRecording()
-        return nil
-      }
-      guard !event.isARepeat else { return nil }
-      guard let shortcut = KeyboardShortcut(event: event) else {
-        self.shortcutHelp.stringValue = "Include Command, Option or Control in your shortcut."
-        return nil
-      }
-      do {
-        try self.applyShortcut(shortcut)
-        self.cancelRecording()
-      } catch {
-        self.shortcutHelp.stringValue = error.localizedDescription
-      }
-      return nil
+    for (action, label) in shortcutLabels {
+      label.stringValue = modifiers.displayName(for: action)
+    }
+    shortcutHelp.stringValue =
+      "Choose the modifiers shared by every app shortcut. Plain Esc stays available to games."
+  }
+
+  @objc private func changeModifiers() {
+    let rawValue = modifierButtons.reduce(UInt32(0)) { value, item in
+      item.value.state == .on ? value | item.key : value
+    }
+    do {
+      let value = ShortcutModifiers(rawValue: rawValue)
+      guard value.isValid else { throw ShortcutModifiersError() }
+      try applyModifiers(value)
+      refreshShortcuts()
+    } catch {
+      refreshShortcuts()
+      shortcutHelp.stringValue = error.localizedDescription
     }
   }
 
-  private func cancelRecording() {
-    isRecording = false
-    if let eventMonitor {
-      NSEvent.removeMonitor(eventMonitor)
-      self.eventMonitor = nil
-    }
-    editButton.title = "Edit Shortcut…"
-    refreshShortcut()
-    shortcutHelp.stringValue = "Start stereo video from any app, or stop the active 3D mode."
-  }
-  func windowWillClose(_ notification: Notification) { cancelRecording() }
-  func windowDidResignKey(_ notification: Notification) { cancelRecording() }
 }
 
 private final class FlippedSettingsView: NSView { override var isFlipped: Bool { true } }

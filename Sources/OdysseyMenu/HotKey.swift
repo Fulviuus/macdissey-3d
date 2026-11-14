@@ -48,6 +48,6 @@ final class HotKey {
 struct HotKeyError: LocalizedError {
   let status: OSStatus
   var errorDescription: String? {
-    "This shortcut is unavailable. Choose another combination. You can activate 3D from the menu."
+    "This shortcut is unavailable. Choose a different modifier combination in Settings."
   }
 }

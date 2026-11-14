@@ -8,8 +8,14 @@ enum SettingsLayoutChecks {
     NSApp.setActivationPolicy(.accessory)
     var selectedLayout: SBSLayout? = .fullWidth
     var appliedLayouts: [SBSLayout] = []
+    var modifiers = ShortcutModifiers.standard
+    var rejectModifiers = false
     let controller = SettingsWindowController(
-      currentShortcut: { .standard }, applyShortcut: { _ in },
+      currentModifiers: { modifiers },
+      applyModifiers: {
+        if rejectModifiers { throw ShortcutModifiersError() }
+        modifiers = $0
+      },
       currentLayout: { selectedLayout },
       applyLayout: {
         selectedLayout = $0
@@ -27,6 +33,24 @@ enum SettingsLayoutChecks {
     let all = descendants(content)
     let scroll = all.compactMap { $0 as? NSScrollView }.first!
     let document = scroll.documentView!
+    let shift = all.compactMap { $0 as? NSButton }.first { $0.title == "Shift" }!
+    let option = all.compactMap { $0 as? NSButton }.first { $0.title == "Option" }!
+    shift.performClick(nil)
+    precondition(modifiers.displayName(for: .exit) == "⌃⌥⇧⌘Esc")
+    for action in ShortcutAction.allCases {
+      let label = all.compactMap { $0 as? NSTextField }.first {
+        $0.accessibilityLabel() == action.title + " shortcut"
+      }!
+      precondition(label.stringValue == modifiers.displayName(for: action))
+    }
+    let beforeRejectedChange = modifiers
+    rejectModifiers = true
+    option.performClick(nil)
+    precondition(option.state == .on, "Failed changes restore all modifier controls")
+    precondition(modifiers == beforeRejectedChange)
+    rejectModifiers = false
+    shift.performClick(nil)
+    precondition(modifiers == .standard)
     let popup = all.compactMap { $0 as? NSPopUpButton }.first!
     precondition(popup.itemTitles == ["Stretch to fill", "Remove black bars"])
     precondition(popup.selectedTag() == SBSLayout.fullWidth.rawValue)
@@ -59,9 +83,9 @@ enum SettingsLayoutChecks {
     content.layoutSubtreeIfNeeded()
     let labels = inspect(document)
     for expected in [
-      "Settings", "Launch at login", "Stereo video shortcut", "⌃⌥⌘3",
-      "2D video conversion (Experimental)", "⌃⇧1", "⌃⇧2", "⌃⇧3", "⌃⇧4", "⌃⇧5", "⌃⇧6",
-      "Stop any 3D mode", "Esc", "Side-by-side picture",
+      "Settings", "Launch at login", "App shortcuts", "⌃⌥⌘3",
+      "2D video conversion (Experimental)", "⌃⌥⌘1", "⌃⌥⌘2", "⌃⌥⌘4", "⌃⌥⌘5", "⌃⌥⌘6", "⌃⌥⌘7",
+      "Stop any 3D mode", "⌃⌥⌘Esc", "Side-by-side picture",
     ] {
       precondition(labels.contains(expected), "Missing setting: \(expected)")
     }

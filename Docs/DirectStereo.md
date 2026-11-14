@@ -8,7 +8,8 @@ It currently presents fullscreen on one supported Odyssey G90XF.
 
 Users run macdissey with **Allow App Connections** enabled in its menu (disabled
 by default). A client connects when it wants to present 3D, and closes when it is
-finished. **Escape**, opening macdissey's menu, sleep, a display change, client
+finished. The configured exit shortcut (**Control–Option–Command–Escape** by
+default), opening macdissey's menu, sleep, a display change, client
 shutdown or a missed heartbeat ends playback. A producer must respect that stop;
 the SDK does not automatically reconnect after the user exits.
 
@@ -128,7 +129,9 @@ swift run --build-system native DirectStereoDemo --seconds 10
 ```
 
 This connects to the running app and **activates the physical display and 3D
-lenses** for ten seconds, then restores the desktop. Press Escape to stop early.
+lenses** for ten seconds, then restores the desktop. Use the configured exit shortcut to stop early.
+Plain Escape remains available to the producer or game; changing the shared
+modifiers in macdissey Settings also changes the exit shortcut.
 The default scene is a miniature gallery with a tiled floor, architectural
 panels, columns, pedestals, shaded spheres and rotating ring sculptures. Geometry
 is uploaded once, then rendered as triangles with lighting and analytic floor

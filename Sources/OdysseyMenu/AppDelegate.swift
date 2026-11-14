@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import MacdisseyClient
 import OSLog
 import OdysseyConversion
@@ -11,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private let threeD = ThreeDSession()
   private var threeDStatus = "3D is off"
-  private var shortcut = KeyboardShortcut.load()
+  private var shortcutModifiers = ShortcutModifiers.load()
   private var stereoInput = StereoInputSettings.load()
   private lazy var stereoOptions = StereoInputSettingsWindowController(
     current: { [weak self] in self?.stereoInput ?? StereoInputSettings() },
@@ -20,11 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private lazy var depthModels = DepthModelsWindowController(
     library: depthLibrary,
     performChange: { [weak self] action in self?.presentAfterStopping(action) })
-  private var hotKey: HotKey?
-  private var nextHotKeyID: UInt32 = 10
-  private var escapeKey: HotKey?
-  private var conversionKey: HotKey?
-  private var conversionControls: [HotKey] = []
+  private var hotKeys: AppHotKeys?
   private var running = false
   private var changing = false
   private var stopping = false
@@ -41,8 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
   private var factoryStatus = "Connect the Odyssey video and USB cables."
   private lazy var settings = SettingsWindowController(
-    currentShortcut: { [weak self] in self?.shortcut ?? .standard },
-    applyShortcut: { [weak self] value in try self?.changeShortcut(to: value) },
+    currentModifiers: { [weak self] in self?.shortcutModifiers ?? .standard },
+    applyModifiers: { [weak self] value in try self?.changeShortcuts(to: value) },
     currentLayout: { [weak self] in
       guard let self, self.stereoInput.format.isSBS else { return nil }
       return self.threeD.layout
@@ -77,17 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     rebuildMenu()
     loadFactoryProfile()
     configureAppConnections()
-    do { try changeShortcut(to: shortcut) } catch { show(error.localizedDescription) }
-    do {
-      conversionKey = try HotKey(
-        keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(controlKey | shiftKey), id: 400
-      ) { [weak self] in
-        self?.toggleConversion()
-      }
-    } catch {
-      logger.error(
-        "2D conversion shortcut unavailable: \(error.localizedDescription, privacy: .public)")
-    }
+    do { try changeShortcuts(to: shortcutModifiers) } catch { show(error.localizedDescription) }
     threeD.failure = { [weak self] error in
       self?.stop3D(message: error.localizedDescription, reason: "pipeline error")
     }
@@ -183,17 +168,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     toggle.isEnabled = !changing
     toggle.toolTip =
       running
-      ? "Stop 3D and restore the desktop. Press \(shortcut.displayName) or Esc."
-      : "Show a fullscreen stereo video in 3D. Press \(shortcut.displayName) to activate; Esc stops 3D."
+      ? "Stop 3D and restore the desktop. Press \(shortcutModifiers.displayName(for: .exit))."
+      : "Show a fullscreen stereo video in 3D. Press \(shortcutModifiers.displayName(for: .stereo)) to activate; \(shortcutModifiers.displayName(for: .exit)) stops 3D."
     menu.addItem(toggle)
     let conversion = item("Convert 2D Video to 3D (Experimental)", #selector(toggleConversion))
     conversion.isEnabled = !running && !changing
-    conversion.toolTip = "Control–Shift–2. Converts a fullscreen ordinary video; Escape exits."
+    conversion.toolTip =
+      "\(shortcutModifiers.displayName(for: .conversion)). Converts a fullscreen ordinary video; \(shortcutModifiers.displayName(for: .exit)) exits."
     menu.addItem(conversion)
     let desktop = item("Try Desktop 3D (Experimental)", #selector(toggleDesktop))
     desktop.isEnabled = !running && !changing
     desktop.toolTip =
-      "An experimental depth effect that puts the background behind the front window. Escape exits."
+      "An experimental depth effect that puts the background behind the front window. \(shortcutModifiers.displayName(for: .exit)) exits."
     menu.addItem(desktop)
     menu.addItem(.separator())
     let inputMenu = NSMenu()
@@ -262,22 +248,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     presentAfterStopping { [weak self] in self?.stereoOptions.present() }
   }
 
-  private func changeShortcut(to value: KeyboardShortcut) throws {
-    guard value.isValid else {
-      throw AppError.unavailable("Include Command, Option or Control in your shortcut.")
+  private func changeShortcuts(to value: ShortcutModifiers) throws {
+    if let hotKeys {
+      try hotKeys.setModifiers(value)
+    } else {
+      hotKeys = try AppHotKeys(modifiers: value) { [weak self] in self?.handleShortcut($0) }
     }
-    if value == shortcut, hotKey != nil { return }
-    // Register first so a conflicting shortcut cannot discard the working one.
-    let replacement = try HotKey(
-      keyCode: value.keyCode, modifiers: value.modifiers, id: nextHotKeyID
-    ) { [weak self] in
-      guard let self, !self.settings.isRecording else { return }
-      self.toggle3D()
+    shortcutModifiers = value
+    value.save()
+    rebuildMenu()
+  }
+
+  private func handleShortcut(_ action: ShortcutAction) {
+    switch action {
+    case .stereo: toggle3D()
+    case .conversion: toggleConversion()
+    case .exit: stop3D()
+    default:
+      guard running, threeD.mode == .conversion, let adjustment = action.adjustment else { return }
+      threeD.adjustConversion(depth: adjustment.depth, popOut: adjustment.popOut)
     }
-    nextHotKeyID &+= 1
-    hotKey = replacement
-    shortcut = value
-    shortcut.save()
+  }
+
+  private func setShortcutContext(_ context: AppHotKeys.Context) throws {
+    if let hotKeys {
+      try hotKeys.setContext(context)
+    } else {
+      hotKeys = try AppHotKeys(modifiers: shortcutModifiers, context: context) {
+        [weak self] in self?.handleShortcut($0)
+      }
+    }
   }
 
   @objc private func toggle3D() {
@@ -289,7 +289,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc private func toggleConversion() {
-    guard !settings.isRecording else { return }
+    if running || changing {
+      stop3D()
+      return
+    }
     if !running && !changing
       && Bundle.main.url(forResource: "model", withExtension: "onnx", subdirectory: "Conversion")
         == nil
@@ -304,26 +307,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     activate3D(mode: .conversion)
   }
 
-  private func registerConversionControls() throws {
-    let bindings: [(Int, Int, Int)] = [
-      (kVK_ANSI_1, 0, 0), (kVK_ANSI_3, -1, 0), (kVK_ANSI_4, 1, 0), (kVK_ANSI_5, 0, -1),
-      (kVK_ANSI_6, 0, 1),
-    ]
-    conversionControls = try bindings.enumerated().map { index, binding in
-      try HotKey(
-        keyCode: UInt32(binding.0), modifiers: UInt32(controlKey | shiftKey),
-        id: UInt32(410 + index)
-      ) { [weak self] in
-        guard let self, self.running, self.threeD.mode == .conversion else { return }
-        self.threeD.adjustConversion(depth: binding.1, popOut: binding.2)
-      }
-    }
-  }
-
   private func activate3D(
     mode: PresentationMode, completion: ((Result<Void, Error>) -> Void)? = nil
   ) {
-    guard !stopping, !settings.isRecording else {
+    guard !stopping else {
       completion?(.failure(AppError.unavailable("3D is busy.")))
       return
     }
@@ -345,13 +332,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     do {
-      escapeKey = try HotKey(keyCode: UInt32(kVK_Escape), modifiers: 0, id: 2) { [weak self] in
-        self?.stop3D()
-      }
-      if mode == .conversion { try registerConversionControls() }
+      try setShortcutContext(mode == .conversion ? .conversion : .active)
     } catch {
-      escapeKey = nil
-      conversionControls = []
+      try? setShortcutContext(.idle)
       if let completion { completion(.failure(error)) } else { show(error.localizedDescription) }
       return
     }
@@ -369,8 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         completion?(.success(()))
       } catch {
         running = false
-        escapeKey = nil
-        conversionControls = []
+        try? setShortcutContext(.idle)
         threeDStatus = "3D is off"
         if !(error is CancellationError) { failureMessage = error.localizedDescription }
         completion?(.failure(error))
@@ -403,8 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       changing = false
       stopping = false
       threeDStatus = "3D is off"
-      escapeKey = nil
-      conversionControls = []
+      try? setShortcutContext(.idle)
       rebuildMenu()
       if terminationPending {
         NSApp.reply(toApplicationShouldTerminate: true)
@@ -537,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let alert = NSAlert()
       alert.messageText = "macdissey 3d"
       alert.informativeText =
-        "Watch fullscreen stereo videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay a stereo video fullscreen, choose its Stereo Input format, then select Activate 3D or press \(self.shortcut.displayName). Press Esc to stop.\n\nConvert ordinary fullscreen 2D video with Control–Shift–2 (Experimental). During conversion, Control–Shift–3/4 adjusts Depth and Control–Shift–5/6 adjusts Pop-Out.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
+        "Watch fullscreen stereo videos in glasses-free 3D on your Samsung Odyssey 3D monitor. The app uses the monitor’s factory calibration and tracks your eyes to align the 3D image as you move.\n\nPlay a stereo video fullscreen, choose its Stereo Input format, then select Activate 3D or press \(self.shortcutModifiers.displayName(for: .stereo)). Press \(self.shortcutModifiers.displayName(for: .exit)) to stop.\n\nConvert ordinary fullscreen 2D video with \(self.shortcutModifiers.displayName(for: .conversion)) (Experimental). During conversion, \(self.shortcutModifiers.displayName(for: .decreaseDepth))/5 adjusts Depth and \(self.shortcutModifiers.displayName(for: .decreasePopOut))/7 adjusts Pop-Out. Change the shared modifiers for every shortcut in Settings.\n\nDesktop 3D adds an experimental depth effect to your windows.\n\nVersion \(version)\nLicense: MIT (app source; third-party components retain their own licenses)."
       alert.icon = NSApp.applicationIconImage
       alert.addButton(withTitle: "OK")
       alerts.present(alert)

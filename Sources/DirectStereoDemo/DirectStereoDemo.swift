@@ -38,7 +38,8 @@ private enum DemoScene: String {
       print("  [--samples 1|2|4] (default: 4, device support permitting)")
       print("grid: identical screen-plane reference; left/right: isolate one eye, other eye black.")
       print(
-        "Connects to macdissey and activates fullscreen 3D. Escape in macdissey stops playback.")
+        "Connects to macdissey and activates fullscreen 3D. Use macdissey’s configured exit shortcut or its menu to stop playback."
+      )
       return
     }
     guard let pattern = DemoPattern(rawValue: option("--pattern") ?? "stereo") else {

@@ -5,7 +5,8 @@ mkdir -p .build/settings-checks
 swiftc -parse-as-library Sources/OdysseyMonitor/OdysseyDisplay.swift \
     Tests/OdysseyDisplayChecks/main.swift -o .build/settings-checks/OdysseyDisplayChecks
 .build/settings-checks/OdysseyDisplayChecks
-swiftc Sources/OdysseyMenu/KeyboardShortcut.swift Sources/OdysseyMenu/HotKey.swift \
+swiftc -parse-as-library Sources/OdysseyMenu/KeyboardShortcut.swift Sources/OdysseyMenu/HotKey.swift \
+    Sources/OdysseyMenu/AppHotKeys.swift \
     Tests/AppSettingsChecks/main.swift -o .build/settings-checks/AppSettingsChecks
 .build/settings-checks/AppSettingsChecks
 swiftc -parse-as-library Sources/OdysseyMenu/KeyboardShortcut.swift \

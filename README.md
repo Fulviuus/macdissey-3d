@@ -60,7 +60,7 @@ with **+**, enable it, then quit and reopen it.
 1. Choose the video’s format under **Stereo Input** in the menu, then open it
    fullscreen in a player on the Odyssey. SBS is selected by default.
 2. Choose **Activate 3D** in the menu bar, or press **Control–Option–Command–3**.
-3. Look toward the monitor's camera. Press **Escape**, press the activation
+3. Look toward the monitor's camera. Press **Control–Option–Command–Escape**, press the activation
    shortcut again, or open the macdissey menu to stop 3D.
 
 In **Settings… → Side-by-side picture**, use **Stretch to fill** for videos whose
@@ -123,7 +123,7 @@ presentation modes are also outside this feature.
 With VLC 3.0.23, this resolved horizontal misalignment and spillover between the
 eye views observed with its legacy fullscreen mode.
 
-**Settings** contains **Launch at login**, the stereo video shortcut editor, and a reference
+**Settings** contains **Launch at login**, shared shortcut modifiers, and a reference
 for every keyboard shortcut, including conversion controls and how to exit.
 The monochrome menu bar icon adapts to the system appearance.
 
@@ -140,7 +140,7 @@ feedback to the connected app. The interface is off by default. A connected
 app supplies separate GPU-rendered left and right eye views; macdissey starts
 tracking and calibrated fullscreen 3D automatically. Screen capture, SBS packing
 by the producer, AI depth estimation and activation shortcuts are not required.
-Camera permission is still needed. **Escape** stops playback, and client shutdown
+Camera permission is still needed. **Control–Option–Command–Escape** stops playback, and client shutdown
 or a lost heartbeat also stops the session and restores the desktop mode.
 
 The native `MacdisseyClient` Swift package and `MacdisseyIPC` C API transfer
@@ -157,29 +157,39 @@ the working Metal demo and colour-space and synchronization requirements.
 
 ## Keyboard shortcuts
 
-Shortcuts work from other apps, including fullscreen players. In Settings,
-**⌃** means Control, **⇧** Shift, **⌥** Option, and **⌘** Command.
+Shortcuts work from other apps, including fullscreen players and games. All use
+one modifier combination, **Control–Option–Command** by default. Change the
+Control, Option, Command and Shift checkboxes under **Settings → App shortcuts**
+to remap the entire family together. Include at least Control, Option or Command.
+The action keys stay fixed. Existing custom activation modifiers migrate to the
+shared family; stereo activation uses 3.
 
-| Action | Shortcut | Available in |
+Plain **Escape** remains available to games and other apps. The qualified exit
+shortcut stops every macdissey 3D mode, including sessions started by another app.
+In Settings, **⌃** means Control, **⇧** Shift, **⌥** Option, and **⌘** Command.
+
+| Action | Default shortcut | Available in |
 | --- | --- | --- |
-| Start stereo video / stop the active 3D mode | Control–Option–Command–3 (customizable in Settings) | Any app |
-| Start 2D conversion / stop the active 3D mode | Control–Shift–2 | Any app |
-| Show Depth and Pop-Out values | Control–Shift–1 | Active 2D conversion |
-| Decrease 3D Depth | Control–Shift–3 | Active 2D conversion |
-| Increase 3D Depth | Control–Shift–4 | Active 2D conversion |
-| Decrease Pop-Out | Control–Shift–5 | Active 2D conversion |
-| Increase Pop-Out | Control–Shift–6 | Active 2D conversion |
-| Stop any 3D mode | Escape | Any active 3D mode |
+| Start stereo video / stop the active 3D mode | Control–Option–Command–3 | Any app |
+| Start 2D conversion / stop the active 3D mode | Control–Option–Command–2 | Any app |
+| Stop any 3D mode | Control–Option–Command–Escape | Active 3D |
+| Show Depth and Pop-Out values | Control–Option–Command–1 | Active 2D conversion |
+| Decrease 3D Depth | Control–Option–Command–4 | Active 2D conversion |
+| Increase 3D Depth | Control–Option–Command–5 | Active 2D conversion |
+| Decrease Pop-Out | Control–Option–Command–6 | Active 2D conversion |
+| Increase Pop-Out | Control–Option–Command–7 | Active 2D conversion |
 
-Conversion shortcuts are fixed. Desktop 3D and Quit are available from the menu;
-picture sizing is in Settings. Opening the macdissey menu also stops 3D. While editing the stereo video
-shortcut in Settings, Escape cancels recording the new shortcut.
+Changing the modifier combination updates every reference and menu tooltip. A
+failed registration leaves the previous shortcuts in place. Session-only exit
+and adjustment keys are released when playback stops. Desktop 3D and Quit are
+available from the menu; picture sizing is in Settings. Opening the macdissey
+menu also stops 3D.
 
 ## 2D video conversion — experimental
 
 The app can synthesize two eye views from an ordinary fullscreen
 2D video. Choose **Convert 2D Video to 3D (Experimental)** or press
-**Control–Shift–2**. Press **Escape** or open the app menu to stop.
+**Control–Option–Command–2**. Press **Control–Option–Command–Escape** or open the app menu to stop.
 
 The original player shortcuts listed above control the effect, with values
 appearing briefly in the image. Depth changes the separation between the
@@ -243,7 +253,7 @@ remains the app's main purpose.
 
 Choose **Try Desktop 3D (Experimental)** to keep the front window at the screen
 surface while placing the remaining desktop slightly behind it. Click another
-window to change the foreground. Press **Escape** or the activation shortcut to
+window to change the foreground. Press **Control–Option–Command–Escape** or the activation shortcut to
 exit. Opening the macdissey menu stops 3D before displaying the menu.
 
 The effect uses two flat depth layers and keeps normal window and pointer
@@ -424,8 +434,9 @@ Controls include pause, stereo separation (zero is a no-disparity reference),
 grayscale, L/R markers and left-only/right-only output. Use **SBS with eye
 isolation** to investigate optical leakage; anaglyph reconstruction can introduce
 its own signal. **Space** pauses the focused preview, **F** toggles fullscreen,
-**⌘,** opens Controls, and **⌘Q** quits. **Esc** first stops active macdissey 3D;
-press it again to leave the source’s fullscreen view before changing formats.
+**⌘,** opens Controls, and **⌘Q** quits. Use **Control–Option–Command–Escape** to stop macdissey 3D, then **Esc** to leave
+the source’s fullscreen view before changing formats. Shared modifier changes
+in macdissey Settings also apply to its exit shortcut.
 
 **G** toggles the diagnostic **Grid at screen depth** reference while the preview
 is focused. It gives the grid zero disparity while keeping the cube stereoscopic,
